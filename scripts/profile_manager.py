@@ -79,7 +79,7 @@ def export_requirements(session_data, output_path="session_requirements.json"):
 
 def record_session(session_data, rating_data):
     """
-    记录单次完整的生成与打分数据（打分范围 1~5 星）。
+    记录单次完整的生成与打分数据（打分范围允许 0~5 星）。
     """
     profile = load_profile()
     stats = profile["history_stats"]
@@ -94,8 +94,8 @@ def record_session(session_data, rating_data):
         if len(stats["favorite_keywords"]) > 10:
             stats["favorite_keywords"].pop(0)
 
-    # 1~5 星完整加权：
-    # 5星: +0.20, 4星: +0.10, 3星: 0.0, 2星: -0.10, 1星: -0.20
+    # 0~5 星完整加权（支持 0 分彻底差评）：
+    # 5星: +0.20, 4星: +0.10, 3星: 0.0, 2星: -0.10, 1星: -0.20, 0星: -0.30
     avg_score = (
         rating_data.get("atmosphere", 3) +
         rating_data.get("modeling", 3) +
