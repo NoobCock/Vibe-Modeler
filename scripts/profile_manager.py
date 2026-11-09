@@ -1,8 +1,8 @@
 """
 profile_manager.py
-Vibe-Modeler 用户美学偏好持久化与推测引擎
-记录历史生成轨迹、4 维度打分，并推测用户潜在的美学倾向（色温、对比度、构图与风格偏好），
-自动生成 Mermaid 决策溯源图。
+Vibe-Modeler 用户需求导出与打分偏好记录工具
+1. 导出用户本次生成的所有需求参数为单独的 JSON 文件
+2. 记录逐项 1~5 星打分，更新偏好统计，生成流程图
 """
 
 import os
@@ -18,11 +18,11 @@ DEFAULT_PROFILE = {
         "warmth_affinity": 0.0,      # -1.0 (极冷) 到 +1.0 (极暖)
         "contrast_affinity": 0.0,    # -1.0 (柔和低反差) 到 +1.0 (高张力硬光)
         "stylized_vs_realism": 0.0,  # -1.0 (纯写实) 到 +1.0 (纯卡通/赛璐珞)
-        "composition_affinity": "thirds" # thirds / center / cinematic_wide
+        "composition_affinity": "thirds"
     },
     "history_stats": {
         "total_creations": 0,
-        "style_counts": {"realistic": 0, "cartoon": 0},
+        "style_counts": {},
         "favorite_keywords": []
     },
     "sessions": []
@@ -42,36 +42,51 @@ def save_profile(profile):
     with open(PROFILE_PATH, "w", encoding="utf-8") as f:
         json.dump(profile, f, ensure_ascii=False, indent=2)
 
+def export_requirements(session_data, output_path="session_requirements.json"):
+    """
+    导出本次画图确认的所有用户需求为单独的 JSON 文件，便于后续比对与调优。
+    """
+    req_data = {
+        "export_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "style": {
+            "form_and_geometry": session_data.get("geometry_form", session_data.get("style", "现代极简构筑")),
+            "material_shading": session_data.get("material_shading", "PBR物理微质感"),
+            "lighting_mood": session_data.get("lighting_mood", session_data.get("tone", "日照晴空"))
+        },
+        "color": {
+            "temperature": session_data.get("color_temperature", session_data.get("tone", "偏暖")),
+            "saturation": session_data.get("color_saturation", "低饱和灰调"),
+            "custom_palette": session_data.get("custom_palette", "")
+        },
+        "scene": {
+            "selected_inspiration": session_data.get("keyword", ""),
+            "hero_subject": session_data.get("subject", ""),
+            "stage_environment": session_data.get("scene", ""),
+            "user_custom_detail": session_data.get("user_detail", "")
+        },
+        "camera": {
+            "aspect_ratio": session_data.get("ratio", "16:9"),
+            "lens_preset": session_data.get("camera_lens", "标准视角（带景深）")
+        },
+        "artifacts": {
+            "render_image": session_data.get("render_file", "render.png"),
+            "blend_project": session_data.get("blend_file", "scene.blend")
+        }
+    }
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(req_data, f, ensure_ascii=False, indent=2)
+    return os.path.abspath(output_path)
+
 def record_session(session_data, rating_data):
     """
-    session_data:
-      - style: "realistic" | "cartoon"
-      - keyword: str
-      - subject: str
-      - scene: str
-      - tone: "warm" | "cold" | "neutral"
-      - contrast: "high" | "low" | "medium"
-      - ratio: "16:9" | "21:9" | "1:1" | "9:16"
-      - camera_lens: "wide" | "standard" | "portrait_dof"
-      - blend_file: str
-      - render_file: str
-
-    rating_data:
-      - atmosphere: int (1~5)
-      - modeling: int (1~5)
-      - lighting: int (1~5)
-      - composition: int (1~5)
-      - user_comment: str
+    记录单次完整的生成与打分数据（打分范围 1~5 星）。
     """
     profile = load_profile()
     stats = profile["history_stats"]
     stats["total_creations"] += 1
     
-    style = session_data.get("style", "cartoon")
-    if style in stats["style_counts"]:
-        stats["style_counts"][style] += 1
-    else:
-        stats["style_counts"][style] = 1
+    style = session_data.get("style", "现代极简构筑")
+    stats["style_counts"][style] = stats["style_counts"].get(style, 0) + 1
 
     kw = session_data.get("keyword")
     if kw and kw not in stats["favorite_keywords"]:
@@ -79,28 +94,21 @@ def record_session(session_data, rating_data):
         if len(stats["favorite_keywords"]) > 10:
             stats["favorite_keywords"].pop(0)
 
-    # 动态推测并更新美学权重 (根据用户打分加权更新)
+    # 1~5 星完整加权：
+    # 5星: +0.20, 4星: +0.10, 3星: 0.0, 2星: -0.10, 1星: -0.20
+    avg_score = (
+        rating_data.get("atmosphere", 3) +
+        rating_data.get("modeling", 3) +
+        rating_data.get("lighting", 3) +
+        rating_data.get("composition", 3)
+    ) / 4.0
+    impact = (avg_score - 3.0) * 0.10
+
     weights = profile["aesthetic_weights"]
-    avg_score = (rating_data.get("atmosphere", 4) + rating_data.get("lighting", 4)) / 2.0
-    impact = 0.15 if avg_score >= 4 else -0.05
-
-    # 色调倾向更新
-    if session_data.get("tone") == "warm":
+    if session_data.get("tone") in ["warm", "偏暖"]:
         weights["warmth_affinity"] = max(-1.0, min(1.0, weights["warmth_affinity"] + impact))
-    elif session_data.get("tone") == "cold":
+    elif session_data.get("tone") in ["cold", "偏冷"]:
         weights["warmth_affinity"] = max(-1.0, min(1.0, weights["warmth_affinity"] - impact))
-
-    # 对比度倾向更新
-    if session_data.get("contrast") == "high":
-        weights["contrast_affinity"] = max(-1.0, min(1.0, weights["contrast_affinity"] + impact))
-    elif session_data.get("contrast") == "low":
-        weights["contrast_affinity"] = max(-1.0, min(1.0, weights["contrast_affinity"] - impact))
-
-    # 风格倾向更新
-    if style == "cartoon":
-        weights["stylized_vs_realism"] = max(-1.0, min(1.0, weights["stylized_vs_realism"] + impact))
-    else:
-        weights["stylized_vs_realism"] = max(-1.0, min(1.0, weights["stylized_vs_realism"] - impact))
 
     record = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -109,77 +117,30 @@ def record_session(session_data, rating_data):
     }
     profile["sessions"].append(record)
     save_profile(profile)
+
+    # 同时导出单次需求 JSON
+    export_requirements(session_data)
     return profile
 
-def get_aesthetic_insight(profile=None):
-    if profile is None:
-        profile = load_profile()
-    weights = profile["aesthetic_weights"]
-    stats = profile["history_stats"]
-
-    warmth_text = "偏好温暖治愈调性（日落金橙、温润暖光）" if weights["warmth_affinity"] > 0.2 else (
-        "偏好清冷静谧调性（月光蓝、清冽青冷光）" if weights["warmth_affinity"] < -0.2 else "冷暖平衡或随场景自适应"
-    )
-    contrast_text = "喜好高反差光影张力（明显明暗面、雕刻轮廓）" if weights["contrast_affinity"] > 0.2 else (
-        "喜好柔和漫射空气感（微光弥漫、低反差层次）" if weights["contrast_affinity"] < -0.2 else "自然均衡反差"
-    )
-    style_text = "倾向二次元/卡通赛璐珞唯美风" if weights["stylized_vs_realism"] > 0.2 else (
-        "倾向写实电影级光影 PBR 质感" if weights["stylized_vs_realism"] < -0.2 else "风格多元包容"
-    )
-
-    return {
-        "total_creations": stats["total_creations"],
-        "warmth_text": warmth_text,
-        "contrast_text": contrast_text,
-        "style_text": style_text,
-        "top_keywords": stats["favorite_keywords"][-5:]
-    }
-
 def generate_mermaid_trace(session_data, rating_data):
-    style = "写实风格" if session_data.get("style") == "realistic" else "唯美卡通"
-    kw = session_data.get("keyword", "晨曦微光")
-    subj = session_data.get("subject", "孤岛灯塔")
-    sc = session_data.get("scene", "悬崖与云海")
-    tone = "暖色调（晨昏金橙）" if session_data.get("tone") == "warm" else "冷色调（青蓝幽静）"
-    contrast = "高对比度（硬光雕刻）" if session_data.get("contrast") == "high" else "低对比度（柔光弥漫）"
-    ratio = session_data.get("ratio", "16:9 宽屏")
+    style = session_data.get("geometry_form", session_data.get("style", "极简建筑"))
+    kw = session_data.get("keyword", "画风初定")
+    subj = session_data.get("subject", "主体")
+    sc = session_data.get("scene", "地表")
+    tone = session_data.get("tone", "偏暖")
+    ratio = session_data.get("ratio", "16:9")
     
-    score_atm = rating_data.get("atmosphere", 5)
-    score_mod = rating_data.get("modeling", 5)
-    score_lit = rating_data.get("lighting", 5)
-    score_cam = rating_data.get("composition", 5)
+    score_atm = rating_data.get("atmosphere", 3)
+    score_mod = rating_data.get("modeling", 3)
+    score_lit = rating_data.get("lighting", 3)
+    score_cam = rating_data.get("composition", 3)
 
-    mermaid_code = f"""```mermaid
+    return f"""```mermaid
 flowchart LR
-    subgraph S1 ["1. 灵感与风格"]
-        F1["风格: {style}"] --> F2["核心词: {kw}"]
-    end
-
-    subgraph S2 ["2. 主体与场景"]
-        F3["主体: {subj}"] --> F4["场景: {sc}"]
-    end
-
-    subgraph S3 ["3. 视效预设"]
-        F5["色调: {tone}"]
-        F6["反差: {contrast}"]
-        F7["画幅: {ratio}"]
-    end
-
-    subgraph S4 ["4. Subagents 协同建模"]
-        P1["环境布光师"]
-        P2["主体建模师"]
-        P3["运镜导演"]
-    end
-
-    subgraph S5 ["5. 视觉自省与微调"]
-        R1["EEVEE 秒级预览"] --> R2["Agent 看图自省微调"]
-        R2 --> R3["最终成品输出"]
-    end
-
-    subgraph S6 ["6. 用户多维评价"]
-        Score["⭐ 唯美氛围: {score_atm}/5<br>⭐ 主体造型: {score_mod}/5<br>⭐ 色彩光影: {score_lit}/5<br>⭐ 构图运镜: {score_cam}/5"]
-    end
-
-    S1 --> S2 --> S3 --> S4 --> S5 --> S6
+    S1["风格: {style}"] --> S2["灵感: {kw}"]
+    S2 --> S3["主体: {subj}"]
+    S3 --> S4["环境: {sc}"]
+    S4 --> S5["色温: {tone} / 画幅: {ratio}"]
+    S5 --> S6["渲染与检查"]
+    S6 --> S7["评分:<br>氛围: {score_atm}星<br>造型: {score_mod}星<br>色彩: {score_lit}星<br>镜头: {score_cam}星"]
 ```"""
-    return mermaid_code
