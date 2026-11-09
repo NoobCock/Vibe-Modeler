@@ -1,0 +1,19 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Blender temporary & backup files
+*.blend1
+*.blend2
+*.bphys
+temp_patch.py
+*.log
+
+# Caches and archives
+assets_cache/
+*.zip
+
+# OS generated files
+.DS_Store
+Thumbs.db
