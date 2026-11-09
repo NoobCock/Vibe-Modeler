@@ -12,7 +12,7 @@
    - 现代建筑：平顶、大挑檐、落地窗、大块地砖。
    - 场景景物：道路、小船、台阶、护栏、树木。
 2. **材质表面**：
-   - 物理 PBR 真实质感：微水泥粗糙度起伏、金属拉丝、磨砂玻璃折射、剥落锈迹。
+   - 物理 PBR 真实微质感：使用照片级扫描贴图或生图贴图，表现真实微反光、表面微凹凸、拉丝微划痕、剥落锈迹。
    - 哑光石膏黏土：纯色高粗糙度无高光，靠阴影出体积。
    - 纯平切面（Flat）：纯色面片，不开光滑着色。
    - 赛璐珞二次元：明确的双阶色块过渡与描边。
@@ -24,16 +24,49 @@
 
 ---
 
-## 二、常见画风搭配参考（仅作示例）
+## 二、真实写实质感设计原则（拒绝纯噪波假材质）
+
+### 1. 为什么纯数学噪波做不出写实质感？
+很多模型在做写实材质时喜欢偷懒，只用几个噪波节点（Noise Texture）连在粗糙度和凹凸上。这样生成出来的水泥、木头或铁板，看起来全是一团团机械重复的灰色假斑点，表面光秃秃像廉价塑料，完全没有真实世界里经历风吹日晒形成的微观划痕、粉尘吸附、局部水渍与物理凹凸。
+
+### 2. 写实材质的双引擎主动选择
+
+在写实与带生活痕迹的场景中，**必须主动使用贴图驱动材质，不要依赖纯数学噪波**：
+
+- **引擎一：调取免费真实扫描贴图包（第三方 CC0 PBR 资产）**
+  - 地面、道路、混凝土立面、木板栈道、礁石、金属板等大面积真实结构，优先从 Poly Haven 等开放资产库调取真实扫描贴图（包含 Base Color 颜色、Roughness 粗糙度、Normal 法线贴图）。
+  - 使用盒式投影（Box Mapping，设置 `projection='BOX'` 和 `projection_blend=0.2`），物体哪怕没有展开 UV，贴图也会自然包裹无缝拼接。
+  - 常用参考资产（仅供参考，不限以下）：
+    - 混凝土立面与地面：`brushed_concrete_03`, `concrete_layers_02`
+    - 风化木板与旧船：`weathered_planks`, `dark_wood`
+    - 铁锈与旧金属板：`green_metal_rust`, `metal_plate`
+    - 海边礁石与山石：`aerial_rocks_01`, `rock_moss`
+    - 沙滩与泥地：`aerial_sand`, `aerial_mud_1`
+    - 石膏粉墙与砖墙：`clay_plaster`, `brick_floor_003`
+
+- **引擎二：调用自带生图能力生成定制 PBR 贴图**
+  - 当需要特定个性化质感（例如：日漫写实风的斑驳路标、老旧墙面手绘涂鸦、特定裂缝磨损、特殊的金属拉丝划痕灰度图、特定水渍油污反光分布）时，**主动调用生图子智能体（image-generator）生成高清无缝贴图或黑白灰度图**。
+  - **生图提示词技巧**：
+    - 颜色与质感图：`A high-resolution seamless texture of weathered peeled turquoise paint on concrete wall with subtle micro scratches, top-down view, flat even lighting, square aspect ratio`
+    - 粗糙度黑白遮罩图：`A high-contrast grayscale seamless roughness map of scratched weathered metal surface, black represents smooth glossy areas, white represents rough matte areas, top-down view, square aspect ratio`
+    - 微观凹凸高度图：`A grayscale height bump map of cracked dry mud surface, high contrast micro cracks, top-down view, square aspect ratio`
+  - 生成图片后，调用 `templates/materials.py` 的 `setup_generated_texture_material`，着色器会自动把明暗反差转化为粗糙度高光变化和微观凹凸起伏。
+
+- **纯噪波程序化的定位**：
+  纯数学噪波仅作为极简低多边形（Low-Poly）、抽象纯色发光体、或离线断网且无生图条件时的保底防线。
+
+---
+
+## 三、常见画风搭配参考（仅作示例）
 
 ### 1. 暗调科技抽象（金属与玻璃）
 - 形状：半空悬浮的长方体、棱柱。
-- 材质：高透磨砂玻璃（粗糙度 0.1，IOR 1.52）、拉丝金属（金属度 1.0，带微划痕）、橙色自发光小块。
+- 材质：高透磨砂玻璃（粗糙度 0.1，IOR 1.52）、真实拉丝金属贴图（带微划痕）、橙色自发光小块。
 - 色调：纯黑背景 + 银灰金属 + 局部电光橙。
 
 ### 2. 超现实极简建筑（石膏与黏土）
 - 形状：单点透视长廊、连续拱门、极简台阶、圆球。
-- 材质：哑光石膏粉墙（粗糙度 0.9，无明显反光）、浅色原木。
+- 材质：哑光石膏粉墙贴图（高粗糙度无高光反光）、浅色原木贴图。
 - 色调：蜜桃粉配奶白，或纯白配浅水泥灰与淡蓝窗洞。
 
 ### 3. 低多边形风光（Low-Poly）
@@ -43,10 +76,10 @@
 
 ### 4. 日系动漫写实风（带岁月感的场景）
 - 形状：淹水的公路、老旧小船、防波堤、带杂草的栏杆。
-- 材质：带做旧细节的 PBR（剥落白漆、局部铁锈斑、混凝土微孔、水面反光）。
+- 材质：调用真实 PBR 扫描贴图或 AI 生图生成的带做旧细节贴图（剥落白漆、局部铁锈斑、微水泥粗糙起伏、水面高光反射）。
 - 色调：清澈蔚蓝天空与海水，翠绿植物，暖橙锈斑点缀。
 
 ### 5. 极简滨海建筑
 - 形状：平顶大挑檐水泥屋、落地大玻璃、整齐砂岩地砖、沙坑多肉。
-- 材质：微粗糙清水混凝土、砂石铺地、双面反射玻璃。
+- 材质：真实扫描微水泥贴图、沙石贴图、双面反射玻璃。
 - 色调：砂石米黄 + 水泥中灰 + 海水蓝。
