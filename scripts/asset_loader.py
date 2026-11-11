@@ -3,8 +3,10 @@ asset_loader.py
 Vibe-Modeler 资产与材质调度器
 提供：
 1. 免费高质量 CC0 PBR 贴图集下载与缓存（基于 Poly Haven 开放 API，涵盖混凝土、木材、锈铁、岩石等）
-2. 将生图生成的单张纹理自动转换为完整 PBR 贴图（粗糙度图 Roughness、凹凸图 Bump、法线图 Normal）
-3. 离线兜底天空、二次元赛璐珞着色器与体积雾
+2. 免费 CC0 3D 模型搜索与下载（树、岩石、家具、杂物等，.blend 格式连同贴图）
+3. 天空环境光（HDRI）下载
+4. 将生图生成的单张纹理自动转换为完整 PBR 贴图（粗糙度图 Roughness、凹凸图 Bump、法线图 Normal）
+5. 离线兜底天空、二次元赛璐珞着色器与体积雾
 """
 
 import os
@@ -36,11 +38,94 @@ COMMON_PBR_PRESETS = {
     "metal_rust": "green_metal_rust",
     "metal_plate": "metal_plate",
     "rock": "aerial_rocks_01",
-    "rock_moss": "rock_moss",
+    "rock_grass": "aerial_grass_rock",
     "sand": "aerial_sand",
     "plaster": "clay_plaster",
     "brick": "brick_floor_003"
 }
+
+# 常见天空环境光（HDRI）预设（仅作快捷参考，可用 search_cc0_assets("hdris", ...) 搜更多）
+COMMON_HDRI_PRESETS = {
+    "midday_clouds": "kloofendal_48d_partly_cloudy_puresky",
+    "dusk": "qwantani_dusk_2_puresky",
+    "sunset": "industrial_sunset_02_puresky",
+    "night_moon": "moonlit_golf",
+    "studio": "studio_small_09",
+}
+
+_API_HEADERS = {"User-Agent": "Vibe-Modeler/1.0"}
+_CATALOG_MEMO = {}
+
+def _get_json(url, timeout=8):
+    req = urllib.request.Request(url, headers=_API_HEADERS)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+def _download_file(url, out_path, timeout=20):
+    if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+        return out_path
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    req = urllib.request.Request(url, headers=_API_HEADERS)
+    with urllib.request.urlopen(req, timeout=timeout) as rf, open(out_path, "wb") as wf:
+        wf.write(rf.read())
+    return out_path
+
+def search_cc0_assets(asset_type="models", keywords=None, categories=None, limit=15):
+    """
+    在 Poly Haven 资产库里按关键词搜索，返回 [(asset_id, 名称, 分类列表), ...]。
+    asset_type: "models"（3D 模型）/ "textures"（贴图）/ "hdris"（天空环境光）
+    keywords:   英文关键词列表，匹配资产 id、名称、标签，任一命中即可，如 ["boat", "ship"]
+    categories: 分类过滤，如 ["trees"]、["rocks"]、["furniture"]、["sunrise-sunset"]
+    预设表只是常用快捷方式，场景需要别的东西时应当先用这个函数搜，不要只在预设里挑。
+    """
+    try:
+        if asset_type not in _CATALOG_MEMO:
+            _CATALOG_MEMO[asset_type] = _get_json(f"https://api.polyhaven.com/assets?type={asset_type}")
+        catalog = _CATALOG_MEMO[asset_type]
+    except Exception as e:
+        print(f"[AssetLoader] 资产目录获取失败: {e}")
+        return []
+
+    kws = [k.lower() for k in (keywords or [])]
+    cats = [c.lower() for c in (categories or [])]
+    results = []
+    for asset_id, info in catalog.items():
+        name = str(info.get("name", asset_id))
+        tags = [t.lower() for t in info.get("tags", [])]
+        acats = [c.lower() for c in info.get("categories", [])]
+        haystack = " ".join([asset_id.lower(), name.lower()] + tags)
+        if kws and not any(k in haystack for k in kws):
+            continue
+        if cats and not any(c in acats for c in cats):
+            continue
+        results.append((asset_id, name, info.get("categories", []), info.get("download_count", 0)))
+    results.sort(key=lambda r: -r[3])
+    return [(r[0], r[1], r[2]) for r in results[:limit]]
+
+def download_cc0_model(asset_id, resolution="1k"):
+    """
+    下载 Poly Haven 的免费 3D 模型（.blend 格式，连同贴图一起），返回本地 .blend 绝对路径。
+    贴图按 .blend 里记录的相对路径（textures/...）放好，导入后材质能直接找到图。
+    失败返回 None，调用方应退回手写建模。
+    """
+    ensure_cache_dir()
+    model_dir = os.path.join(CACHE_DIR, "models", asset_id)
+    try:
+        data = _get_json(f"https://api.polyhaven.com/files/{asset_id}")
+        blend_res = data.get("blend", {})
+        entry = blend_res.get(resolution) or blend_res.get("1k") or (next(iter(blend_res.values())) if blend_res else None)
+        if not entry or "blend" not in entry:
+            print(f"[AssetLoader] {asset_id} 没有 .blend 版本")
+            return None
+        info = entry["blend"]
+        blend_path = os.path.join(model_dir, os.path.basename(info["url"]))
+        _download_file(info["url"], blend_path)
+        for rel_path, inc in info.get("include", {}).items():
+            _download_file(inc["url"], os.path.join(model_dir, *rel_path.split("/")))
+        return blend_path
+    except Exception as e:
+        print(f"[AssetLoader] 模型 {asset_id} 下载失败: {e}")
+        return None
 
 def download_pbr_texture_set(asset_id, resolution="1k", maps=None):
     """

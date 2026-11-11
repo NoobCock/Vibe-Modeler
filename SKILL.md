@@ -27,6 +27,19 @@ description: 通过提问引导用户选择画面风格、场景与光影，在 
 
 建模前通过选择题向用户确认：
 
+### 0. 先读历史评分（提问前，不需要问用户）
+运行：
+```bash
+python scripts/profile_manager.py --hints
+```
+根据返回结果调整下面五问的选项：
+- `prefer` 里的选项（以往平均 4 星以上）：可以标 `(Recommended)`。
+- `caution` 里的选项（2~3 星）：照常列出，不标推荐。
+- `avoid` 里的选项（2 星以下，含 0 星）：不标推荐，排到最后，并在选项后面注明“上次评分低”。用户主动选了照做，不要劝。
+- `recent_scenes`：最近几次用过的灵感、主角、环境。第三问和第四问现场构思时不要再出现这些东西或换个说法的同一件东西。
+- `warmth_affinity`：正数说明用户历史上偏好暖色，负数偏冷，用来决定色温问题的推荐项。
+- 没有历史记录（`total_creations` 为 0）时，按下文默认推荐项走。
+
 ### 1. 画面风格（第一问）
 询问画面整体的形体与构筑风格：
 - `(Recommended) 现代极简建筑风光（平顶大挑檐、落地大玻璃、开阔空间感）`
@@ -64,49 +77,104 @@ description: 通过提问引导用户选择画面风格、场景与光影，在 
 
 ## 三、检查 Blender 路径与运行方式
 
-开始前执行探测脚本：
+开始前执行探测脚本（Windows / macOS / Linux 都能用，找不到时让用户设置环境变量 `BLENDER_PATH`）：
 ```bash
 python scripts/blender_finder.py --json
 ```
 让用户选择运行方式：
 - **后台静默运行（CLI 模式，推荐）**：自动在后台生成代码并渲染，输出图片和 `.blend` 文件。
-- **联动已打开的 Blender 窗口（RPC 模式）**：检查 `http://127.0.0.1:9876/status`，将操作同步推送到 Blender 视口。
+- **联动已打开的 Blender 窗口（RPC 模式）**：检查 `http://127.0.0.1:9876/status`，用 `blender_runner.run_rpc_execute(code)` 把代码推送到 Blender 视口（会自动带上模板函数，不会清空用户当前场景）。
+
+每次生成都会新建一个输出文件夹 `outputs/年月日_时分秒_标签/`，图片、`.blend`、检查报告、需求 JSON 都放在里面，不会覆盖上一次的结果。
 
 ---
 
 ## 四、场景代码编写要求
 
-按三个模块组织 Blender Python (bpy) 代码：
+### 0. 怎么执行
+不要自己从头写整段渲染脚本。把代码分成三段字符串，交给 [`scripts/blender_runner.py`](scripts/blender_runner.py) 的 `run_scene`：
+```python
+from scripts import blender_runner as br
+settings = {
+    "mode": "preview",               # 自审用 EEVEE 预览；定稿后改成 "final"
+    "width": 1920, "height": 1080,   # 按第五问选的画幅
+    "subjects": ["主角物体名"],        # 渲染前检查用；导入的模型填 import_cc0_model 返回的空物体名字
+    "output_dir": br.new_output_dir("简短标签"),
+    # 可选："bloom": {"glare_type": "Bloom", "threshold": 1.0, "strength": 0.4}, "look": "AgX - Punchy", "exposure": 0.3
+}
+result = br.run_scene(env_code, mesh_code, camera_code, settings)
+```
+- `templates/` 下所有函数（材质、几何节点、建模、摆放、布光、渲染设置）和 `asset_loader` 的下载函数会**自动注入**到脚本开头，三段代码里直接调用即可，不要复制粘贴模板源码。
+- `run_scene` 会把完整脚本存到输出文件夹（`scene_script_preview.py`），报错时去看这个文件对应的行。
 
 ### 1. 环境与布光
-- 根据选定的色温调配天空背景（渐变或纯色）和主光。
-- 采用三点光布局：45度侧照的主光（Key Light）、反向柔和补光（Fill Light）、主体边缘轮廓光（Rim Light）。
+- **天空与环境光**：
+  - 写实场景**优先用真实天空环境光（HDRI）**：`asset_loader.download_cc0_asset(id)` 下载，`setup_hdri_world(path, strength, rotation_deg)` 接入。金属、玻璃、水面要靠它才能反射出真实的天空细节。常用 id 在 `asset_loader.COMMON_HDRI_PRESETS`，不够用就 `asset_loader.search_cc0_assets("hdris", ["sunset"], categories=["sunrise-sunset"])` 搜。
+  - 想要纯色或深色背景、又想保留真实反射时，传 `camera_background=(r, g, b, 1)`：镜头看到的是纯色，照明和反射仍来自 HDRI。
+  - 二次元、低多边形、纯色抽象风格可以用 `setup_procedural_sky` 渐变天空。
+- **灯光**：主光（Key Light）45 度侧照，反向柔和补光（Fill Light），主体边缘轮廓光（Rim Light）。用了 HDRI 时补光可以省掉或调弱，主光用太阳光（Sun）对齐 HDRI 里太阳的方向。[`templates/lighting_rigs.py`](templates/lighting_rigs.py) 里有现成布光可以参考或直接调用。
+- **色彩管理**（`settings` 里的 `view` / `look` / `exposure`）：
+  - 默认 `AgX`，亮部过渡自然，不容易一片死白。
+  - 赛璐珞二次元、纯平色块风格用 `"view": "Standard"`，颜色才会和设定值一致，不会被压灰。
+- **泛光后期**：有逆光、发光体、霓虹、夕阳高光时，在 `settings` 里加 `bloom`，给亮部加一圈柔和光晕。
 
-### 2. 物体与材质（写实场景拒绝单调纯噪波，优先真实资产与生图）
+### 2. 物体建模（复杂物体不要用一个基础几何体糊弄）
+- **先拆部件再建模**：每个主要物体至少拆成 3 个以上部件。例如一扇窗要有外框、玻璃、窗台；一张桌子要有桌面、四条腿、横撑；一盏路灯要有灯杆、灯臂、灯罩、底座。严禁用一个立方体代表一栋房子、一个圆柱代表一棵树。
+- **形状复杂的东西优先用免费 3D 模型**：树、岩石、家具、船、杂物、植物，先用 `asset_loader.search_cc0_assets("models", ["英文关键词"], categories=[...])` 搜，找到合适的再用 `asset_loader.download_cc0_model(id)` 下载、`import_cc0_model(path, location, rotation_z_deg, target_height)` 导入（`target_height` 按真实尺寸填，椅子约 0.9 米、成年树 4~10 米）。搜不到或断网时再手写建模。
+- **手写建模用修改器加细节**（[`templates/modeling.py`](templates/modeling.py)）：
+  - `add_bevel` 倒角：所有硬边都要加，让边缘接住高光。
+  - `add_solidify` 加厚度：墙板、屋顶、桌面、船壳、布料不能是单面片。
+  - `add_simple_deform` 弯曲 / 扭转 / 锥化：拱形屋顶、上细下粗的树干和石柱、弯曲的灯杆。
+  - `add_array` 阵列：栏杆、台阶、木板、窗格、柱廊。
+  - `add_subdivision`、`add_noise_displace`：圆润曲面、不平整的岩石和土堆。
+  - 现成部件：`make_rock`（不规则岩石）、`make_plank_floor`（每块木板单独有微小差异的木地板 / 栈道）。
+
+### 3. 物体材质（写实场景拒绝单调纯噪波，优先真实资产与生图）
 在写实质感、做旧或二次元写实场景下，**严禁偷懒使用纯程序化噪波（Noise Texture）代替表面微质感**。纯噪波做出来的材质像廉价塑料，缺乏真实世界微观瑕疵与物理立体起伏。材质设计必须具备主观能动性，按以下三阶梯执行：
 
 - **第一梯队（写实首选：真实扫描 CC0 PBR 贴图集）**：
-  - 场景中的地面、混凝土立面、木板栈道、锈蚀铁板、礁石沙滩等大面积写实物体，**主动调用 `scripts/asset_loader.py` 的 `download_pbr_texture_set(...)` 下载真实照片扫描贴图**（包含 Base Color 颜色、Roughness 粗糙度、Normal 法线）。
+  - 场景中的地面、混凝土立面、木板栈道、锈蚀铁板、礁石沙滩等大面积写实物体，**主动调用 `asset_loader.download_pbr_texture_set(...)` 下载真实照片扫描贴图**（包含 Base Color 颜色、Roughness 粗糙度、Normal 法线）。`asset_loader.COMMON_PBR_PRESETS` 只是几个常用快捷名，场景需要别的材质时用 `asset_loader.search_cc0_assets("textures", ["英文关键词"])` 搜。
   - 调用 [`templates/materials.py`](templates/materials.py) 中的 `setup_pbr_texture_material(...)` 进行着色。默认开启盒式投影（Box Mapping，`projection='BOX'`, `projection_blend=0.2`），物体无需费时展开 UV 也能均匀包裹，不会拉伸错位。
 - **第二梯队（特化写实首选：调用自带生图能力生成专属贴图）**：
   - 当场景需要特定画风或定制细节（例如：日漫写实做旧斑驳墙面、特定涂鸦海报、特定地面泥泞水渍遮罩、定制划痕金属粗糙度灰度图）时，**主动调用 `image-generator` 子智能体生成高清平铺或高对比度黑白贴图**。
   - 将生成的图片路径传入 [`templates/materials.py`](templates/materials.py) 中的 `setup_generated_texture_material(...)`。节点树会自动分离明暗通道，同时驱动表面微观凹凸（Bump）与不同区域的反光差异（Roughness），瞬间获得立体写实质感。
 - **第三梯队（保底与非写实风格）**：
   - 纯程序化噪波节点**仅限用于**：纯平低多边形（Low-Poly）、抽象纯色发光棱柱、透光玻璃（`pbr_frosted_dispersion_glass`）、或离线断网且无生图条件时的最后保底。**在写实场景下严禁把纯噪波作为主要材质手段**。
-- **形体与配景**：
-  - 主体硬边一律添加倒角修改器（Bevel），避免完全锋利的生硬边缘。
-  - 地表需要散布碎石杂草或半空微尘时，调用 [`templates/geo_nodes.py`](templates/geo_nodes.py) 中的几何节点。
 
-### 3. 构图与相机
+### 4. 物体摆放（不能浮空、不能陷地、配景不能穿模）
+地面一旦用了 `apply_gn_terrain_displacement` 做起伏，就不能再假设地面在 Z=0。按这个顺序写（[`templates/placement.py`](templates/placement.py)、[`templates/geo_nodes.py`](templates/geo_nodes.py)）：
+1. 先建地面和地形起伏。
+2. 再放主角和大件配景，每个都调用 `snap_to_ground(obj)` 落到真实地面上：
+   - 石头、树、房子用默认 `mode="average"`；
+   - 椅子、桌子、路灯等带腿或有底座的东西用 `mode="highest"`，避免腿陷进地里；
+   - 斜坡上想顺着坡面倾斜的加 `align_to_normal=True`。
+3. 最后才撒草、碎石、花：`apply_gn_surface_scatter(地面, 样本物体, avoid_objects=[主角们], avoid_radius=...)`，主角周围留出一圈空地，草和石头不会长穿主角。样本物体会被自动隐藏。
+
+### 5. 构图与相机
 - 相机使用 Track To 约束对准主体。
 - 主体放置在画面三分线交点，留出至少三分之一的空白区域。
 - 开启相机景深（Depth of Field），对焦在主体上。
+- 把主角物体的名字填进 `settings["subjects"]`，渲染前会自动检查：相机有没有钻进物体或地下、主角在不在画面里、占画面多大、有没有被挡住、有没有浮空或陷地。
+
+### 6. 预览与正式出图两种模式
+- `"mode": "preview"`：EEVEE，800 宽，几秒出图，同时生成全景辅助图 `overview.png` 和检查报告 `report_preview.json`。自审阶段一律用这个。
+- `"mode": "final"`：Cycles 光线追踪，自动找显卡（OptiX / CUDA / HIP / Metal，找不到用 CPU），自动降噪，按用户选的分辨率出图。玻璃折射、水面反射、室内暗部这些 EEVEE 做不真实的效果要靠它。自审通过后再切到这个模式。
+- `samples` 可以不填：预览默认 32，正式默认 256。
 
 ---
 
 ## 五、预览与自审（严禁自我感动）
 
-用 `read_file` 查看渲染出的 800x600 预览图。自审时**严禁自我感动**，必须像挑剔的第三方观众一样，用批判的眼光审视画面整体结构与材质表现，而不是只在表层核对“代码里写没写某些部件”：
+每次预览跑完，按这个顺序看：
+
+1. **先看检查报告**（`result["report"]`，也存成了输出文件夹里的 `report_preview.json`）：
+   - `preflight.issues` 不为空：先按提示修（浮空就 `snap_to_ground`，主角出画就调相机，被挡住就挪开遮挡物），修完重跑，**有问题时不要开始看图评价，更不要出正式图**。
+   - `missing_images` 不为空：有贴图丢了，材质会变成紫红色，先查下载路径。
+   - `missing_subjects` 不为空：`subjects` 里写的名字在场景里找不到，名字写错了或者物体没建出来。
+2. **再用 `read_file` 看 `preview.png`**。
+3. **画面发黑、发空、主角不见了时**，看 `overview.png`（斜上方全景，红色箭头是主相机的位置和朝向）和报告里的 `diagnostics`（每个物体的坐标范围、灯光朝向和亮度、相机朝向），先确认是灯没亮、相机朝错方向，还是物体跑到了别处，再动手改，不要凭感觉乱调参数。
+
+看图自审时**严禁自我感动**，必须像挑剔的第三方观众一样，用批判的眼光审视画面整体结构与材质表现，而不是只在表层核对“代码里写没写某些部件”：
 
 1. **画面结构审视（先看整体，再看局部）**：
    - **画面是否空旷简陋**：是不是只孤零零立着一两个简陋图元？地面是不是一块光秃秃的死板平面？如果是，画面就是不及格的半成品，必须调整机位或补充环境配景。
@@ -115,12 +183,14 @@ python scripts/blender_finder.py --json
 2. **材质微观质感审视（拒绝塑料感与单调纯噪波）**：
    - **主体与近景是否有物理立体感**：物体表面看起来像不像溜光的廉价塑料玩具？表面有没有真实的反光层次（粗糙度微瑕）和微观起伏（法线凹凸）？
    - **是否敷衍使用了纯噪波**：表面是不是只有一圈生硬的黑白噪波杂点？在写实场景下，一旦发现材质塑料感强、缺乏真实贴图细节，**坚决判定为材质不及格**，必须立即换用真实 CC0 贴图或生图贴图重新渲染！
+   - **大面积贴图有没有重复格子**：地面、墙面远看能不能看出一格一格重复的图案？能看出来就把 `mapping_scale` 调小（数值越小，单格贴图覆盖的面积越大）、换一张尺度更大的贴图，或者用散布的碎石杂草打断。
+   - **复杂物体是不是积木**：树、船、家具是不是几个方块圆柱拼的？是的话换成 CC0 模型，或者按“先拆部件”的要求重做。
 3. **色彩与光影审视**：
    - **色彩是否浑浊发脏**：整体色调是不是灰蒙蒙、发黄发绿的泥巴感？天空与阴影之间有没有通透的明暗和冷暖反差？
    - **曝光平衡**：暗部是不是大面积死黑看不清结构，高光是不是大面积纯白过曝？
 4. **针对性修正**：
-   - 只要画面整体结构单调、材质发假像塑料、或色彩发脏，哪怕代码写得再工整，也坚决不能判定为合格。必须生成微调脚本（换用真实 PBR 贴图、拉远拉近相机、调整仰俯角、调整灯光强度与色温、补充地表与配景），重新跑一次预览。
-5. 确认画面整体结构协调、材质微质感真实、光影舒适后，再切换为最终设定的分辨率渲染出图，并保存 `.blend` 工程文件。
+   - 只要画面整体结构单调、材质发假像塑料、或色彩发脏，哪怕代码写得再工整，也坚决不能判定为合格。必须修改代码（换用真实 PBR 贴图或 CC0 模型、拉远拉近相机、调整仰俯角、调整灯光强度与色温、补充地表与配景），重新跑一次预览。
+5. 确认画面整体结构协调、材质微质感真实、光影舒适后，把 `settings["mode"]` 改成 `"final"`、`output_dir` 保持同一个文件夹，再跑一次 `run_scene` 出正式图。会得到 `render.png` 和 `scene.blend`（预览阶段的工程存为 `scene_preview.blend`）。保存前外部贴图会自动打包进 `.blend`，文件拷到别处打开也不会丢贴图。
 
 ---
 
@@ -129,7 +199,9 @@ python scripts/blender_finder.py --json
 出图后向用户展示图片，并按以下顺序执行：
 
 ### 1. 导出用户需求记录为 JSON
-出图完成后，自动调用 `scripts/profile_manager.py` 的 `export_requirements(session_data)`，在当前目录下导出 `session_requirements.json`。该文件记录本次用户确认的所有风格、色调、主体、场景、相机与输出路径参数，便于后续辨识和比对。
+出图完成后，调用 `scripts/profile_manager.py` 的 `export_requirements(session_data)`。`session_data` 里带上 `output_dir`，文件会写到本次的输出文件夹里（`session_requirements.json`）。该文件记录本次用户确认的所有风格、色调、主体、场景、相机、用到的 CC0 资产（`assets_used`）与输出路径，便于后续辨识和比对。
+
+`session_data` 的键：`geometry_form`（第一问）、`material_shading`（第二问）、`keyword`（第三问）、`subject` / `scene` / `user_detail`（第四问）、`color_temperature` / `color_saturation` / `ratio` / `camera_lens`（第五问）、`assets_used`、`output_dir`、`render_file`、`blend_file`。选项按用户实际选的原文填，下次读历史评分时才对得上。
 
 ### 2. 逐项单独提问打分（允许 0 分，从 0 星到 5 星完整提供选项）
 分 4 次逐个向用户提问打分（选项必须从 0 星到 5 星完整列出，允许用户给出 0 分彻底差评）：
@@ -162,8 +234,10 @@ python scripts/blender_finder.py --json
   - `4星（视角舒服，留白合理）`
   - `5星（电影感强，视角极佳）`
 
-打分收集完毕后调用 `record_session()` 更新 `user_profile.json` 并生成 Mermaid 流程图。
+打分收集完毕后调用 `record_session(session_data, {"atmosphere": 氛围星数, "modeling": 造型星数, "lighting": 色彩星数, "composition": 镜头星数})` 更新 `user_profile.json`（按选项累计平均分，下次提问前的 `--hints` 就是读这里），再用 `generate_mermaid_trace()` 生成流程图。
 
 ### 3. 对话式改图
 - 用户提出修改要求时，**先问清楚具体范围和程度，不要自己猜**。
-- 确认要求后，调用 `blender_runner.py` 中的 `run_incremental_patch` 在原有 `.blend` 文件基础上修改特定对象或灯光，不要从头推倒重做。
+- 确认要求后，调用 `blender_runner.run_incremental_patch(原 .blend 路径, 修改代码, settings)` 在原有 `.blend` 基础上修改特定对象或灯光，不要从头推倒重做。修改代码里同样可以直接调用所有模板函数。
+- 每次修改另存为 `tweak_01.png` / `scene_tweak_01.blend`（序号自动递增），原文件保留。用户说“还是上一版好”时直接拿上一版的 `.blend` 接着改。
+- 改图同样先看检查报告再看图，改完要正式出图时 `settings` 里写 `"mode": "final"`。

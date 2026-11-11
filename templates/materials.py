@@ -194,8 +194,17 @@ def create_pbr_frosted_glass_material(name="Mat_PBR_FrostedGlass", tint_color=(0
     elif "Transmission" in bsdf.inputs:
         bsdf.inputs["Transmission"].default_value = 1.0
         
-    mat.blend_method = 'BLEND'
-    mat.shadow_method = 'NONE'
+    # EEVEE 透明与折射设置（兼容 4.2+ 与 5.x；5.0 起 shadow_method 已删除）
+    if hasattr(mat, "surface_render_method"):
+        mat.surface_render_method = 'DITHERED'
+        if hasattr(mat, "use_raytrace_refraction"):
+            mat.use_raytrace_refraction = True
+        if hasattr(mat, "use_transparent_shadow"):
+            mat.use_transparent_shadow = True
+    elif hasattr(mat, "blend_method"):
+        mat.blend_method = 'BLEND'
+    if hasattr(mat, "shadow_method"):
+        mat.shadow_method = 'NONE'
     return mat
 """,
 

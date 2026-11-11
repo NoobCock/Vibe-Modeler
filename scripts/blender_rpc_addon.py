@@ -109,7 +109,7 @@ class VibeRPCHandler(BaseHTTPRequestHandler):
             filepath = payload.get("filepath", os.path.abspath("rpc_render.png"))
             resolution_x = payload.get("width", 1280)
             resolution_y = payload.get("height", 720)
-            engine = payload.get("engine", "BLENDER_EEVEE_NEXT")
+            engine = payload.get("engine", "BLENDER_EEVEE")
 
             def do_render():
                 scene = bpy.context.scene
@@ -117,11 +117,16 @@ class VibeRPCHandler(BaseHTTPRequestHandler):
                 scene.render.filepath = filepath
                 scene.render.resolution_x = resolution_x
                 scene.render.resolution_y = resolution_y
-                if hasattr(scene.render, "engine"):
+                # 4.2~4.x 叫 BLENDER_EEVEE_NEXT，5.0 起叫 BLENDER_EEVEE，依次尝试
+                candidates = [engine]
+                if engine in ("BLENDER_EEVEE", "BLENDER_EEVEE_NEXT"):
+                    candidates = ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT"]
+                for eng in candidates:
                     try:
-                        scene.render.engine = engine
+                        scene.render.engine = eng
+                        break
                     except Exception:
-                        pass
+                        continue
                 bpy.ops.render.render(write_still=True)
                 return os.path.abspath(filepath)
 

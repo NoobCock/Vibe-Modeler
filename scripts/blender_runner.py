@@ -1,27 +1,77 @@
 """
 blender_runner.py
 Vibe-Modeler Blender 执行调度核心
-支持：
-1. 拼装多 Subagent 生成的 bpy 模块为完整脚本
-2. 调度 Blender CLI 后台运行建模、渲染与自省循环
-3. 支持基于现有 .blend 工程的增量局部修改与重新渲染（改图管线）
-4. 联动 RPC 服务向运行中的 Blender 推送指令
+
+1. 把 templates/ 下所有模板函数自动注入生成的脚本，场景代码里可以直接调用（不需要自己复制模板代码）
+2. 预览模式（EEVEE）：渲染前自动做相机与摆放检查、打印场景诊断、拍一张全景辅助图
+3. 正式模式（Cycles + GPU + 降噪）：最终分辨率出图
+4. 每次运行建一个带时间戳的输出文件夹，保存 .blend 前把外部贴图打包进文件
+5. 在现有 .blend 基础上做局部修改（改图），原文件保留不覆盖
+6. 联动 RPC 服务向运行中的 Blender 推送指令
 """
 
 import os
 import sys
-import subprocess
+import time
 import json
+import subprocess
 import urllib.request
 import urllib.error
 
-# Import local finder
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 try:
     from scripts.blender_finder import find_blender
 except ImportError:
     from blender_finder import find_blender
 
+from templates import materials, geo_nodes, modeling, placement, render_pipeline, lighting_rigs
+from scripts import asset_loader
+
 DEFAULT_BLENDER_PATH = find_blender()
+OUTPUTS_DIR = os.path.join(ROOT_DIR, "outputs")
+
+
+# ==========================================
+# 输出文件夹
+# ==========================================
+
+def new_output_dir(tag=None):
+    """建一个 outputs/年月日_时分秒[_tag]/ 文件夹并返回绝对路径，每次生成互不覆盖。"""
+    name = time.strftime("%Y%m%d_%H%M%S")
+    if tag:
+        safe = "".join(c for c in str(tag) if c.isalnum() or c in "-_")[:40]
+        if safe:
+            name += "_" + safe
+    path = os.path.join(OUTPUTS_DIR, name)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+# ==========================================
+# 模板工具箱注入
+# ==========================================
+
+def build_toolkit():
+    """把所有模板函数拼成一段代码，放在生成脚本的开头。"""
+    parts = [
+        "import sys, os",
+        f"sys.path.insert(0, r\"{ROOT_DIR}\")",
+        "# 资产下载函数：asset_loader.download_pbr_texture_set / download_cc0_model / download_cc0_asset / search_cc0_assets",
+        "from scripts import asset_loader",
+    ]
+    for snippets in (render_pipeline.RENDER_PIPELINE_SNIPPETS, placement.PLACEMENT_SNIPPETS,
+                     geo_nodes.GEO_NODES_SNIPPETS, modeling.MODELING_SNIPPETS,
+                     materials.MATERIAL_SNIPPETS, lighting_rigs.LIGHTING_RIG_SNIPPETS):
+        for code in snippets.values():
+            parts.append(code.strip("\n"))
+    for code in (asset_loader.PROCEDURAL_SKY_BPY, asset_loader.PROCEDURAL_TOON_SHADER_BPY,
+                 asset_loader.PROCEDURAL_VOLUMETRIC_FOG_BPY):
+        parts.append(code.strip("\n"))
+    return "\n\n".join(parts)
+
 
 def clean_scene_header():
     return """
@@ -29,95 +79,137 @@ import bpy
 import math
 from mathutils import Vector, Euler
 
-# 1. 清空默认多余场景物体
+# 清空默认场景
 if bpy.context.object and bpy.context.object.mode != 'OBJECT':
     bpy.ops.object.mode_set(mode='OBJECT')
-
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False)
-
-# 清理无用材质和网格孤儿数据
-for block in bpy.data.meshes:
+for block in list(bpy.data.meshes):
     if block.users == 0: bpy.data.meshes.remove(block)
-for block in bpy.data.materials:
+for block in list(bpy.data.materials):
     if block.users == 0: bpy.data.materials.remove(block)
 """
 
-def assemble_script(env_code, mesh_code, camera_code, render_settings):
-    """
-    拼接完整的 Blender Python 自动化脚本
-    """
-    res_x = render_settings.get("width", 1920)
-    res_y = render_settings.get("height", 1080)
-    engine = render_settings.get("engine", "BLENDER_EEVEE_NEXT")
-    samples = render_settings.get("samples", 64)
-    out_img = render_settings.get("output_image", "render.png").replace("\\", "/")
-    out_blend = render_settings.get("output_blend", "scene.blend").replace("\\", "/")
 
-    render_footer = f"""
+def _render_footer(settings, out_dir, image_name, blend_name):
+    """渲染、检查、打包、保存的收尾代码。"""
+    mode = settings.get("mode", "preview")
+    cfg = {
+        "mode": mode,
+        "width": settings.get("width", 1920),
+        "height": settings.get("height", 1080),
+        "samples": settings.get("samples"),
+        "view": settings.get("view", "AgX"),
+        "look": settings.get("look", "AgX - Base Contrast"),
+        "exposure": settings.get("exposure", 0.0),
+        "bloom": settings.get("bloom"),
+        "transparent": settings.get("transparent", False),
+    }
+    subjects = settings.get("subjects", [])
+    overview = settings.get("overview", mode == "preview")
+    pack = settings.get("pack", True)
+    out_dir_s = out_dir.replace("\\", "/")
+    return f"""
 # ==========================================
-# 渲染与输出设置
+# 渲染设置、检查、出图、打包、保存
 # ==========================================
+import json as _vm_json
+_vm_out = r"{out_dir_s}"
+configure_render(**{cfg!r})
 scene = bpy.context.scene
-scene.render.resolution_x = {res_x}
-scene.render.resolution_y = {res_y}
-scene.render.resolution_percentage = 100
-scene.render.image_settings.file_format = 'PNG'
-scene.render.filepath = r"{out_img}"
 
-try:
-    scene.render.engine = "{engine}"
-    if "{engine}" == "CYCLES":
-        scene.cycles.samples = {samples}
-    elif hasattr(scene, "eevee"):
-        if hasattr(scene.eevee, "max_samples"):
-            scene.eevee.max_samples = {samples}
-        elif hasattr(scene.eevee, "taa_render_samples"):
-            scene.eevee.taa_render_samples = {samples}
-except Exception as e:
-    print(f"[RenderEngine] Warning: {{e}}")
+_vm_subject_names = {list(subjects)!r}
+_vm_subjects = [bpy.data.objects[n] for n in _vm_subject_names if n in bpy.data.objects]
+_vm_missing = [n for n in _vm_subject_names if n not in bpy.data.objects]
+_vm_report = {{
+    "mode": "{mode}",
+    "missing_subjects": _vm_missing,
+    "preflight": preflight_check(_vm_subjects) if _vm_subjects else None,
+    "diagnostics": scene_diagnostics(),
+}}
+_vm_report["missing_images"] = [img.name for img in bpy.data.images
+                                if img.source == 'FILE' and not img.packed_file
+                                and not os.path.exists(bpy.path.abspath(img.filepath))]
+if {overview!r}:
+    try:
+        _vm_report["overview_image"] = render_overview(os.path.join(_vm_out, "overview.png"))
+    except Exception as _e:
+        print(f"[Vibe-Modeler] 全景辅助图失败: {{_e}}")
 
-# 触发单帧渲染
+scene.render.filepath = os.path.join(_vm_out, "{image_name}")
 bpy.ops.render.render(write_still=True)
+_vm_report["image"] = scene.render.filepath
 print(f"[Vibe-Modeler] 图像渲染完成: {{scene.render.filepath}}")
 
-# 保存工程文件
-try:
-    bpy.ops.wm.save_as_mainfile(filepath=r"{out_blend}")
-    print(f"[Vibe-Modeler] 工程文件保存完成: {out_blend}")
-except Exception as e:
-    print(f"[Vibe-Modeler] 保存工程警告: {{e}}")
+if {pack!r}:
+    try:
+        bpy.ops.file.pack_all()
+        print("[Vibe-Modeler] 外部贴图已打包进 .blend")
+    except Exception as _e:
+        print(f"[Vibe-Modeler] 打包贴图警告: {{_e}}")
+_vm_blend = os.path.join(_vm_out, "{blend_name}")
+bpy.context.preferences.filepaths.save_version = 0  # 不生成 .blend1 备份文件（只影响这次后台运行）
+bpy.ops.wm.save_as_mainfile(filepath=_vm_blend)
+_vm_report["blend"] = _vm_blend
+with open(os.path.join(_vm_out, "report_{os.path.splitext(image_name)[0]}.json"), "w", encoding="utf-8") as _f:
+    _vm_json.dump(_vm_report, _f, ensure_ascii=False, indent=2)
+print(f"[Vibe-Modeler] 工程文件保存完成: {{_vm_blend}}")
 """
 
-    full_script = f"""# -*- coding: utf-8 -*-
+
+def assemble_script(env_code, mesh_code, camera_code, render_settings):
+    """
+    拼接完整的 Blender 脚本：清空场景 → 模板工具箱 → 环境与布光 → 建模 → 相机 → 检查与出图。
+    render_settings 常用键：
+      mode: "preview"（EEVEE 自审用）/ "final"（Cycles GPU 正式出图）
+      output_dir: 输出文件夹（默认自动新建 outputs/时间戳/）
+      width, height, samples, view, look, exposure, bloom, transparent
+      subjects: 主角物体名字列表，用于渲染前检查（导入模型填它的空物体父级名字）
+      overview: 是否拍全景辅助图（预览模式默认开）
+      pack: 保存前是否打包贴图（默认开）
+    """
+    out_dir = render_settings.get("output_dir") or new_output_dir()
+    render_settings["output_dir"] = out_dir
+    mode = render_settings.get("mode", "preview")
+    image_name = "preview.png" if mode == "preview" else "render.png"
+    blend_name = "scene_preview.blend" if mode == "preview" else "scene.blend"
+
+    return f"""# -*- coding: utf-8 -*-
 {clean_scene_header()}
 
 # ==========================================
-# 1. 场景环境与灯光架构 (scene-architect)
+# 0. 模板工具箱（自动注入，下面的代码可以直接调用这些函数）
+# ==========================================
+{build_toolkit()}
+
+# ==========================================
+# 1. 场景环境与灯光 (scene-architect)
 # ==========================================
 {env_code}
 
 # ==========================================
-# 2. 主体与配景几何建模 (mesh-modeler)
+# 2. 主体与配景建模 (mesh-modeler)
 # ==========================================
 {mesh_code}
 
 # ==========================================
-# 3. 构图与镜头拍摄系统 (camera-director)
+# 3. 构图与相机 (camera-director)
 # ==========================================
 {camera_code}
 
-{render_footer}
+{_render_footer(render_settings, out_dir, image_name, blend_name)}
 """
-    return full_script
 
-def run_cli_render(script_path, base_blend_path=None, blender_path=None):
+
+# ==========================================
+# 运行
+# ==========================================
+
+def run_cli_render(script_path, base_blend_path=None, blender_path=None, timeout=1800):
     """
-    运行 Blender 后台渲染。
-    若传入 base_blend_path，则在加载现有 .blend 基础上运行脚本（用于增量改图）。
+    后台运行 Blender。传入 base_blend_path 时先打开该 .blend 再执行脚本（改图用）。
     """
-    if not blender_path:
-        blender_path = DEFAULT_BLENDER_PATH
+    blender_path = blender_path or DEFAULT_BLENDER_PATH
     if not blender_path or not os.path.isfile(blender_path):
         raise FileNotFoundError(f"未找到可用的 Blender 可执行文件，请检查安装或设置 BLENDER_PATH: {blender_path}")
 
@@ -127,67 +219,89 @@ def run_cli_render(script_path, base_blend_path=None, blender_path=None):
     cmd.extend(["--python-exit-code", "1", "-P", script_path])
 
     print(f"[*] 启动 Blender CLI: {' '.join(cmd)}")
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     if proc.returncode != 0:
-        print("[!] Blender 报错日志:\n", proc.stderr or proc.stdout)
-        raise RuntimeError(f"Blender 运行异常退出 (Code {proc.returncode}):\n{proc.stderr[-800:]}")
-    print("[*] Blender CLI 执行成功！")
+        log = (proc.stdout or "")[-2000:] + "\n" + (proc.stderr or "")[-2000:]
+        raise RuntimeError(f"Blender 运行异常退出 (Code {proc.returncode}):\n{log}")
+    print("[*] Blender CLI 执行成功")
     return proc.stdout
+
+
+def _collect_result(out_dir, image_name, stdout):
+    report_path = os.path.join(out_dir, f"report_{os.path.splitext(image_name)[0]}.json")
+    report = None
+    if os.path.exists(report_path):
+        with open(report_path, "r", encoding="utf-8") as f:
+            report = json.load(f)
+    return {"output_dir": out_dir, "report_file": report_path, "report": report, "stdout_tail": stdout[-1500:]}
+
+
+def run_scene(env_code, mesh_code, camera_code, render_settings, blender_path=None):
+    """
+    一步完成：拼脚本 → 存到输出文件夹（scene_script.py，方便复查和重跑）→ 后台运行 → 读回检查报告。
+    返回 {"output_dir", "report_file", "report", "stdout_tail"}。
+    report["preflight"]["issues"] 不为空时，先修好再出正式图。
+    """
+    script = assemble_script(env_code, mesh_code, camera_code, render_settings)
+    out_dir = render_settings["output_dir"]
+    mode = render_settings.get("mode", "preview")
+    script_path = os.path.join(out_dir, f"scene_script_{mode}.py")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write(script)
+    stdout = run_cli_render(script_path, blender_path=blender_path)
+    return _collect_result(out_dir, "preview.png" if mode == "preview" else "render.png", stdout)
+
 
 def run_incremental_patch(base_blend_path, patch_code, render_settings, blender_path=None):
     """
-    基于现有 .blend 工程执行局部增量修改并重新渲染
+    在现有 .blend 上执行局部修改并重新渲染。
+    结果存为同一文件夹下的 tweak_01.png / scene_tweak_01.blend（序号自动递增），原文件保留，方便退回。
     """
-    out_img = render_settings.get("output_image", "render_tweaked.png").replace("\\", "/")
-    out_blend = render_settings.get("output_blend", base_blend_path).replace("\\", "/")
-    engine = render_settings.get("engine", "BLENDER_EEVEE_NEXT")
-    samples = render_settings.get("samples", 64)
+    out_dir = render_settings.get("output_dir") or os.path.dirname(os.path.abspath(base_blend_path))
+    os.makedirs(out_dir, exist_ok=True)
+    n = 1
+    while os.path.exists(os.path.join(out_dir, f"tweak_{n:02d}.png")) or \
+            os.path.exists(os.path.join(out_dir, f"scene_tweak_{n:02d}.blend")):
+        n += 1
+    image_name = f"tweak_{n:02d}.png"
+    blend_name = f"scene_tweak_{n:02d}.blend"
+    settings = dict(render_settings)
+    settings.setdefault("overview", False)
 
-    patch_wrapper = f"""# -*- coding: utf-8 -*-
+    patch_script = f"""# -*- coding: utf-8 -*-
 import bpy
 import math
 from mathutils import Vector, Euler
 
-# 执行增量修改指令
+{build_toolkit()}
+
+# ==========================================
+# 增量修改
+# ==========================================
 {patch_code}
 
-# 重新触发渲染与保存
-scene = bpy.context.scene
-scene.render.image_settings.file_format = 'PNG'
-scene.render.filepath = r"{out_img}"
-try:
-    scene.render.engine = "{engine}"
-    if "{engine}" == "CYCLES":
-        scene.cycles.samples = {samples}
-    elif hasattr(scene, "eevee"):
-        if hasattr(scene.eevee, "max_samples"):
-            scene.eevee.max_samples = {samples}
-        elif hasattr(scene.eevee, "taa_render_samples"):
-            scene.eevee.taa_render_samples = {samples}
-except Exception:
-    pass
-
-bpy.ops.render.render(write_still=True)
-bpy.ops.wm.save_as_mainfile(filepath=r"{out_blend}")
-print("[*] 增量修改渲染与保存完成")
+{_render_footer(settings, out_dir, image_name, blend_name)}
 """
-    patch_script_file = os.path.abspath("temp_patch.py")
-    with open(patch_script_file, "w", encoding="utf-8") as f:
-        f.write(patch_wrapper)
+    script_path = os.path.join(out_dir, f"patch_{n:02d}.py")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write(patch_script)
+    stdout = run_cli_render(script_path, base_blend_path=base_blend_path, blender_path=blender_path)
+    return _collect_result(out_dir, image_name, stdout)
 
-    try:
-        res = run_cli_render(patch_script_file, base_blend_path=base_blend_path, blender_path=blender_path)
-        return res
-    finally:
-        if os.path.exists(patch_script_file):
-            try: os.remove(patch_script_file)
-            except Exception: pass
 
-def run_rpc_execute(code_str, rpc_url="http://127.0.0.1:9876/execute"):
+# ==========================================
+# RPC 模式（联动已打开的 Blender）
+# ==========================================
+
+def run_rpc_execute(code_str, rpc_url="http://127.0.0.1:9876/execute", with_toolkit=True, timeout=120):
+    """向运行中的 Blender 发送代码。with_toolkit=True 时先注入模板函数。不会清空用户当前场景。"""
+    if with_toolkit:
+        code_str = "import bpy, math\nfrom mathutils import Vector, Euler\n" + build_toolkit() + "\n\n" + code_str
     payload = json.dumps({"code": code_str}).encode("utf-8")
     req = urllib.request.Request(rpc_url, data=payload, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
 
 def check_rpc_status(rpc_url="http://127.0.0.1:9876/status"):
     try:

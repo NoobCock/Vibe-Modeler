@@ -1,6 +1,6 @@
 """
 blender_finder.py
-自动扫描与探测 Windows 环境下的 Blender 可执行文件路径
+自动扫描与探测 Blender 可执行文件路径（Windows / macOS / Linux）
 全程动态探测：无任何硬编码绝对路径或盘符，自适应不同系统与 Steam 库分布。
 """
 
@@ -9,13 +9,25 @@ import sys
 import glob
 import shutil
 import json
-import winreg
 import string
+
+IS_WINDOWS = sys.platform.startswith("win")
+IS_MAC = sys.platform == "darwin"
+
+try:
+    import winreg  # 只有 Windows 有
+except ImportError:
+    winreg = None
+
+EXE_NAMES = ("blender.exe",) if IS_WINDOWS else ("blender", "Blender")
+
+def _is_blender_exe(path):
+    return bool(path) and os.path.isfile(path) and os.path.basename(path) in EXE_NAMES
 
 def get_env_blender():
     """检查环境变量 BLENDER_PATH"""
     env_path = os.environ.get("BLENDER_PATH")
-    if env_path and os.path.isfile(env_path) and env_path.lower().endswith("blender.exe"):
+    if _is_blender_exe(env_path):
         return os.path.abspath(env_path)
     return None
 
@@ -28,6 +40,8 @@ def get_path_blender():
 
 def get_registry_blender():
     """通过 Windows 注册表关联与安装项动态检索"""
+    if winreg is None:
+        return None
     reg_keys = [
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Classes\blendfile\shell\open\command"),
         (winreg.HKEY_CURRENT_USER, r"Software\Classes\blendfile\shell\open\command"),
@@ -51,17 +65,26 @@ def get_registry_blender():
     return None
 
 def get_steam_libraries():
-    """动态读取 Steam 配置以获取所有 Steam 库所在路径"""
+    """动态读取 Steam 配置以获取所有 Steam 库所在路径（Windows 读注册表，macOS / Linux 读默认 Steam 目录）"""
     libraries = []
     steam_path = None
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
-            val, _ = winreg.QueryValueEx(key, "SteamPath")
-            if val and os.path.isdir(val):
-                steam_path = os.path.abspath(val)
-                libraries.append(steam_path)
-    except Exception:
-        pass
+    if winreg is not None:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
+                val, _ = winreg.QueryValueEx(key, "SteamPath")
+                if val and os.path.isdir(val):
+                    steam_path = os.path.abspath(val)
+        except Exception:
+            pass
+    else:
+        for cand in ("~/Library/Application Support/Steam", "~/.steam/steam", "~/.local/share/Steam",
+                     "~/.var/app/com.valvesoftware.Steam/.local/share/Steam"):
+            p = os.path.expanduser(cand)
+            if os.path.isdir(p):
+                steam_path = p
+                break
+    if steam_path:
+        libraries.append(steam_path)
 
     if steam_path:
         vdf_path = os.path.join(steam_path, "steamapps", "libraryfolders.vdf")
@@ -81,7 +104,9 @@ def get_steam_libraries():
     return libraries
 
 def get_system_logical_drives():
-    """动态获取 Windows 当前所有已挂载的逻辑盘符"""
+    """动态获取 Windows 当前所有已挂载的逻辑盘符（非 Windows 返回空列表）"""
+    if not IS_WINDOWS:
+        return []
     drives = []
     try:
         import ctypes
@@ -97,16 +122,53 @@ def get_system_logical_drives():
                 drives.append(root)
     return drives
 
+def _unix_candidates():
+    """macOS / Linux 常见安装位置"""
+    pats = []
+    if IS_MAC:
+        pats += [
+            "/Applications/Blender.app/Contents/MacOS/Blender",
+            "/Applications/Blender*.app/Contents/MacOS/Blender",
+            os.path.expanduser("~/Applications/Blender*.app/Contents/MacOS/Blender"),
+        ]
+    else:
+        pats += [
+            "/usr/bin/blender", "/usr/local/bin/blender", "/snap/bin/blender",
+            "/var/lib/flatpak/exports/bin/org.blender.Blender",
+            os.path.expanduser("~/.local/share/flatpak/exports/bin/org.blender.Blender"),
+            "/opt/blender*/blender",
+            os.path.expanduser("~/blender*/blender"),
+            os.path.expanduser("~/Applications/blender*/blender"),
+        ]
+    found = []
+    for pat in pats:
+        for m in glob.glob(pat):
+            if os.path.isfile(m) and os.access(m, os.X_OK):
+                found.append(os.path.abspath(m))
+    return found
+
 def scan_disk_candidates():
-    """动态扫描所有盘符与 Steam 库中的 Blender 安装位置"""
+    """动态扫描所有盘符、Steam 库与常见安装目录中的 Blender"""
     candidates = []
 
     # 1. 动态扫描 Steam 库
     steam_libs = get_steam_libraries()
     for lib in steam_libs:
-        cand = os.path.join(lib, "steamapps", "common", "Blender", "blender.exe")
+        if IS_WINDOWS:
+            rel = ("steamapps", "common", "Blender", "blender.exe")
+        elif IS_MAC:
+            rel = ("steamapps", "common", "Blender", "Blender.app", "Contents", "MacOS", "Blender")
+        else:
+            rel = ("steamapps", "common", "Blender", "blender")
+        cand = os.path.join(lib, *rel)
         if os.path.isfile(cand):
             candidates.append(os.path.abspath(cand))
+
+    if not IS_WINDOWS:
+        candidates += _unix_candidates()
+        candidates = list(dict.fromkeys(candidates))
+        candidates.sort(reverse=True)
+        return candidates[0] if candidates else None
 
     # 2. 动态扫描所有系统盘
     drives = get_system_logical_drives()
