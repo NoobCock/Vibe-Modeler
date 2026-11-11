@@ -1,0 +1,4 @@
+# 打包 Release 时不放进 skill 包里的文件（git archive 读取 export-ignore）
+.github/ export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore

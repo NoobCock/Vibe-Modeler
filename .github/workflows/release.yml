@@ -1,0 +1,117 @@
+# 打包 Vibe-Modeler skill 并发布 GitHub Release
+#
+# 两种触发方式：
+# 1. 推送版本标签：  git tag v1.0.0 && git push origin v1.0.0
+# 2. 手动运行：      GitHub 仓库页 → Actions → Release → Run workflow，填版本号
+#
+# 产物：Vibe-Modeler-<版本号>.zip，解压后是一个 Vibe-Modeler/ 文件夹，直接放进 skills 目录即可使用。
+# 包内只有 git 已跟踪的文件（SKILL.md、references/、scripts/、templates/ 等），
+# imageref/、assets_cache/、outputs/、user_profile.json 等本地文件不会进包。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（例如 v1.0.0；该标签不存在时会在当前提交上自动创建）"
+        required: true
+        type: string
+      prerelease:
+        description: "标记为预发布版本"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.event.inputs.version || github.ref_name }}
+      PRERELEASE: ${{ github.event.inputs.prerelease || 'false' }}
+      PKG_NAME: Vibe-Modeler
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 检查版本号格式
+        run: |
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::版本号格式不对：$VERSION（应为 v1.0.0、v1.2.0-beta.1 这样的格式）"
+            exit 1
+          fi
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] && gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "::error::Release $VERSION 已经存在，请换一个版本号"
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 检查 skill 文件完整、脚本没有语法错误
+        run: |
+          test -f SKILL.md || { echo "::error::缺少 SKILL.md"; exit 1; }
+          head -n 5 SKILL.md | grep -q "^name:" || { echo "::error::SKILL.md 开头缺少 name 字段"; exit 1; }
+          head -n 5 SKILL.md | grep -q "^description:" || { echo "::error::SKILL.md 开头缺少 description 字段"; exit 1; }
+          python -m py_compile scripts/*.py templates/*.py
+          # 模板代码片段本身也要能通过语法检查（它们以字符串形式存在，py_compile 查不到）
+          python - <<'EOF'
+          import ast, importlib, sys
+          sys.path.insert(0, ".")
+          bad = 0
+          for mod_name, attr in [("templates.materials", "MATERIAL_SNIPPETS"),
+                                 ("templates.geo_nodes", "GEO_NODES_SNIPPETS"),
+                                 ("templates.modeling", "MODELING_SNIPPETS"),
+                                 ("templates.placement", "PLACEMENT_SNIPPETS"),
+                                 ("templates.render_pipeline", "RENDER_PIPELINE_SNIPPETS"),
+                                 ("templates.lighting_rigs", "LIGHTING_RIG_SNIPPETS")]:
+              for key, code in getattr(importlib.import_module(mod_name), attr).items():
+                  try:
+                      ast.parse(code)
+                  except SyntaxError as e:
+                      bad += 1
+                      print(f"::error::{mod_name}.{attr}['{key}'] 语法错误: {e}")
+          sys.exit(1 if bad else 0)
+          EOF
+
+      - name: 打包
+        run: |
+          rm -rf build dist && mkdir -p build dist
+          ZIP="dist/${PKG_NAME}-${VERSION}.zip"
+          # 只取 git 已跟踪的文件（.gitattributes 里标了 export-ignore 的不要）
+          git archive --format=tar --prefix="${PKG_NAME}/" HEAD | tar -x -C build
+          echo "$VERSION" > "build/${PKG_NAME}/VERSION"
+          (cd build && zip -rq "../$ZIP" "${PKG_NAME}")
+          (cd dist && sha256sum "$(basename "$ZIP")" > "$(basename "$ZIP").sha256")
+          echo "包内文件："
+          unzip -l "$ZIP"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: 发布 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FLAGS="--title $VERSION --generate-notes --target ${{ github.sha }}"
+          if [[ "$PRERELEASE" == "true" ]] || [[ "$VERSION" == *-* ]]; then
+            FLAGS="$FLAGS --prerelease"
+          fi
+          gh release create "$VERSION" "$ZIP" "$ZIP.sha256" $FLAGS
+          echo "### 已发布 $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 安装包：\`$(basename "$ZIP")\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 校验：\`$(cat "$ZIP.sha256")\`" >> "$GITHUB_STEP_SUMMARY"
