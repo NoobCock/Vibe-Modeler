@@ -4,9 +4,17 @@
 # 1. 推送版本标签：  git tag v1.0.0 && git push origin v1.0.0
 # 2. 手动运行：      GitHub 仓库页 → Actions → Release → Run workflow，填版本号
 #
+# 自己写更新内容（三种写法，按下面的顺序取第一个有内容的）：
+# 1. 手动运行时填“更新内容”输入框：单行输入，用 \n 换行，例如：新增 HDRI 天空\n修复贴地浮空
+# 2. 在仓库里放一个 .github/release-notes/<版本号>.md 文件（例如 .github/release-notes/v1.0.0.md），
+#    写多少行都行，支持 Markdown。提交推送后再打标签或手动运行
+# 3. 打带说明的标签：git tag -a v1.0.0 -m "新增 HDRI 天空" -m "修复贴地浮空"（每个 -m 是一段）
+#    （或者 git tag -a v1.0.0 不带 -m，会打开编辑器写多行），再 git push origin v1.0.0
+# 自己写的内容放在最前面，后面默认再附上 GitHub 根据提交记录自动生成的变更列表（手动运行时可以关掉）。
+#
 # 产物：Vibe-Modeler-<版本号>.zip，解压后是一个 Vibe-Modeler/ 文件夹，直接放进 skills 目录即可使用。
 # 包内只有 git 已跟踪的文件（SKILL.md、references/、scripts/、templates/ 等），
-# imageref/、assets_cache/、outputs/、user_profile.json 等本地文件不会进包。
+# imageref/、assets_cache/、outputs/、user_profile.json、.github/ 等不会进包。
 
 name: Release
 
@@ -20,6 +28,21 @@ on:
         description: "版本号（例如 v1.0.0；该标签不存在时会在当前提交上自动创建）"
         required: true
         type: string
+      title:
+        description: "Release 标题（不填就用版本号）"
+        required: false
+        type: string
+        default: ""
+      notes:
+        description: "更新内容（用 \\n 换行；不填则依次查找 .github/release-notes/<版本号>.md 和标签说明）"
+        required: false
+        type: string
+        default: ""
+      auto_notes:
+        description: "在更新内容后面附上根据提交记录自动生成的变更列表"
+        required: false
+        type: boolean
+        default: true
       prerelease:
         description: "标记为预发布版本"
         required: false
@@ -39,12 +62,20 @@ jobs:
     env:
       VERSION: ${{ github.event.inputs.version || github.ref_name }}
       PRERELEASE: ${{ github.event.inputs.prerelease || 'false' }}
+      AUTO_NOTES: ${{ github.event.inputs.auto_notes || 'true' }}
+      # 用户输入只通过环境变量传给脚本，不直接拼进命令，防止输入里的特殊字符被当成命令执行
+      TITLE_INPUT: ${{ github.event.inputs.title }}
+      NOTES_INPUT: ${{ github.event.inputs.notes }}
       PKG_NAME: Vibe-Modeler
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: 拉取完整标签信息
+        # checkout 在标签触发时会把带说明的标签当成普通标签拉下来，说明文字会丢，这里重新拉一次
+        run: git fetch --force --tags origin
 
       - name: 检查版本号格式
         run: |
@@ -103,15 +134,55 @@ jobs:
           unzip -l "$ZIP"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
 
+      - name: 整理更新内容
+        run: |
+          NOTES_FILE="$RUNNER_TEMP/release_notes.md"
+          : > "$NOTES_FILE"
+          SOURCE="无"
+          REPO_NOTES=".github/release-notes/${VERSION}.md"
+          if [[ -n "${NOTES_INPUT// /}" ]]; then
+            # 输入框里的 \n 换成真正的换行，其他字符原样保留
+            LITERAL_NL='\n'
+            printf '%s\n' "${NOTES_INPUT//"$LITERAL_NL"/$'\n'}" > "$NOTES_FILE"
+            SOURCE="手动输入"
+          elif [[ -f "$REPO_NOTES" ]]; then
+            cp "$REPO_NOTES" "$NOTES_FILE"
+            SOURCE="$REPO_NOTES"
+          elif git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null \
+               && [[ "$(git cat-file -t "refs/tags/$VERSION")" == "tag" ]]; then
+            # 只取带说明的标签（git tag -a）的说明文字，不取签名
+            git tag -l --format='%(contents:subject)' "$VERSION" > "$NOTES_FILE"
+            BODY="$(git tag -l --format='%(contents:body)' "$VERSION")"
+            if [[ -n "${BODY//[[:space:]]/}" ]]; then
+              printf '\n%s\n' "$BODY" >> "$NOTES_FILE"
+            fi
+            SOURCE="标签说明"
+          fi
+          echo "更新内容来源：$SOURCE"
+          echo "-----"
+          cat "$NOTES_FILE"
+          echo "-----"
+          echo "NOTES_FILE=$NOTES_FILE" >> "$GITHUB_ENV"
+          echo "NOTES_SOURCE=$SOURCE" >> "$GITHUB_ENV"
+
       - name: 发布 Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          FLAGS="--title $VERSION --generate-notes --target ${{ github.sha }}"
-          if [[ "$PRERELEASE" == "true" ]] || [[ "$VERSION" == *-* ]]; then
-            FLAGS="$FLAGS --prerelease"
+          TITLE="${TITLE_INPUT:-$VERSION}"
+          ARGS=(--title "$TITLE" --notes-file "$NOTES_FILE" --target "$GITHUB_SHA")
+          # 自动生成的变更列表会接在自己写的内容后面
+          if [[ "$AUTO_NOTES" == "true" ]]; then
+            ARGS+=(--generate-notes)
           fi
-          gh release create "$VERSION" "$ZIP" "$ZIP.sha256" $FLAGS
-          echo "### 已发布 $VERSION" >> "$GITHUB_STEP_SUMMARY"
-          echo "- 安装包：\`$(basename "$ZIP")\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- 校验：\`$(cat "$ZIP.sha256")\`" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$PRERELEASE" == "true" ]] || [[ "$VERSION" == *-* ]]; then
+            ARGS+=(--prerelease)
+          fi
+          gh release create "$VERSION" "$ZIP" "$ZIP.sha256" "${ARGS[@]}"
+          {
+            echo "### 已发布 $VERSION"
+            echo "- 标题：$TITLE"
+            echo "- 更新内容来源：$NOTES_SOURCE（附自动变更列表：$AUTO_NOTES）"
+            echo "- 安装包：\`$(basename "$ZIP")\`"
+            echo "- 校验：\`$(cat "$ZIP.sha256")\`"
+          } >> "$GITHUB_STEP_SUMMARY"
