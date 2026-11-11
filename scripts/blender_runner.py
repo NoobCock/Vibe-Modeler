@@ -27,7 +27,7 @@ try:
 except ImportError:
     from blender_finder import find_blender
 
-from templates import materials, geo_nodes, modeling, placement, render_pipeline, lighting_rigs
+from templates import materials, geo_nodes, modeling, placement, render_pipeline, lighting_rigs, spatial_archetypes
 from scripts import asset_loader
 
 DEFAULT_BLENDER_PATH = find_blender()
@@ -64,6 +64,7 @@ def build_toolkit():
     ]
     for snippets in (render_pipeline.RENDER_PIPELINE_SNIPPETS, placement.PLACEMENT_SNIPPETS,
                      geo_nodes.GEO_NODES_SNIPPETS, modeling.MODELING_SNIPPETS,
+                     spatial_archetypes.SPATIAL_ARCHETYPE_SNIPPETS,
                      materials.MATERIAL_SNIPPETS, lighting_rigs.LIGHTING_RIG_SNIPPETS):
         for code in snippets.values():
             parts.append(code.strip("\n"))
@@ -106,6 +107,7 @@ def _render_footer(settings, out_dir, image_name, blend_name):
         "transparent": settings.get("transparent", False),
     }
     subjects = settings.get("subjects", [])
+    spatial_mode = settings.get("spatial_mode", "grounded")
     overview = settings.get("overview", mode == "preview")
     pack = settings.get("pack", True)
     out_dir_s = out_dir.replace("\\", "/")
@@ -115,16 +117,19 @@ def _render_footer(settings, out_dir, image_name, blend_name):
 # ==========================================
 import json as _vm_json
 _vm_out = r"{out_dir_s}"
+_vm_spatial_mode = {spatial_mode!r}
 configure_render(**{cfg!r})
 scene = bpy.context.scene
 
 _vm_subject_names = {list(subjects)!r}
 _vm_subjects = [bpy.data.objects[n] for n in _vm_subject_names if n in bpy.data.objects]
 _vm_missing = [n for n in _vm_subject_names if n not in bpy.data.objects]
+_vm_preflight = preflight_check(_vm_subjects, spatial_mode=_vm_spatial_mode)
 _vm_report = {{
     "mode": "{mode}",
+    "spatial_mode": _vm_spatial_mode,
     "missing_subjects": _vm_missing,
-    "preflight": preflight_check(_vm_subjects) if _vm_subjects else None,
+    "preflight": _vm_preflight,
     "diagnostics": scene_diagnostics(),
 }}
 _vm_report["missing_images"] = [img.name for img in bpy.data.images
@@ -132,13 +137,25 @@ _vm_report["missing_images"] = [img.name for img in bpy.data.images
                                 and not os.path.exists(bpy.path.abspath(img.filepath))]
 if {overview!r}:
     try:
-        _vm_report["overview_image"] = render_overview(os.path.join(_vm_out, "overview.png"))
+        _vm_report["overview_image"] = render_overview(
+            os.path.join(_vm_out, "overview.png"),
+            subjects=_vm_subjects,
+            spatial_mode=_vm_spatial_mode,
+        )
     except Exception as _e:
         print(f"[Vibe-Modeler] 全景辅助图失败: {{_e}}")
 
 scene.render.filepath = os.path.join(_vm_out, "{image_name}")
 bpy.ops.render.render(write_still=True)
 _vm_report["image"] = scene.render.filepath
+try:
+    _vm_exp = check_render_exposure(scene.render.filepath, spatial_mode=_vm_spatial_mode)
+    _vm_report["exposure_check"] = _vm_exp
+    if _vm_exp and _vm_exp.get("issue"):
+        _vm_preflight["issues"].append(_vm_exp["issue"])
+        _vm_preflight["ok"] = False
+except Exception as _e:
+    print(f"[Vibe-Modeler] 曝光抽检警告: {{_e}}")
 print(f"[Vibe-Modeler] 图像渲染完成: {{scene.render.filepath}}")
 
 if {pack!r}:

@@ -1,11 +1,16 @@
 """
 templates/placement.py
-Vibe-Modeler 摆放与检查模板
+Vibe-Modeler 摆放、多模式空间体检与智能全景辅助图模板
 
-1. snap_to_ground：用射线检测把物体落到真实地面上（地形起伏后不再假设 Z=0）
-2. preflight_check：渲染前检查相机和主角（相机有没有钻进物体或地下、主角在不在画面里、有没有被挡住、有没有浮空或陷地）
-3. scene_diagnostics：打印场景里所有物体的位置范围、灯光、相机朝向，预览图看不出问题时用来排错
-4. render_overview：从斜上方拍一张全景辅助图，并在主相机位置放一个红色箭头，一眼看出相机朝哪、物体在哪
+1. snap_to_ground：用射线检测把物体落到真实地面上（自动跳过体积雾盒）
+2. preflight_check：支持 spatial_mode ("grounded" / "interior" / "floating" / "framed")：
+   - grounded（贴地开阔/街景）：检查相机、主角构图与遮挡，同时全场景排查近中景配景/远山悬空漏底、地面方边断口穿帮
+   - interior（封闭室内/阈限空间/垂直中庭）：放宽建筑结构占画幅上限，豁免地面边缘检查，重点排查穿墙与死黑欠曝
+   - floating（失重超现实/非欧空间）：豁免浮空与地下误报，专注构图、穿模与曝光
+   - framed（窗框/纱帘近景框景）：适配前景框景遮挡与近景构图
+3. check_render_exposure：出图后快速抽样像素亮度，自动拦截“封闭房间忘打光一片死黑”或“大面积死白过曝”
+4. scene_diagnostics：打印场景物体范围、灯光、相机朝向、世界环境
+5. render_overview：围绕“主相机 + 核心主体”智能取景（不被百米远山拉缩成小点），室内模式自动临时隐藏天花板透视内部结构
 """
 
 PLACEMENT_SNIPPETS = {
@@ -20,20 +25,39 @@ def _vm_family(obj):
         stack.extend(o.children)
     return fam
 
+def _vm_is_volume_or_helper(obj):
+    '''判断物体是否为体积雾盒或临时辅助体（无实体表面，不应参与射线贴地、穿模与遮挡判定）。'''
+    if obj is None:
+        return True
+    if obj.name.startswith("VM_TMP_") or obj.get("vm_is_volume"):
+        return True
+    if getattr(obj, "display_type", "") in ("WIRE", "BOUNDS"):
+        # 若材质仅有 Volume 输出而无 Surface 输出，则属于体积雾盒
+        mats = [s.material for s in getattr(obj, "material_slots", []) if s.material and s.material.use_nodes]
+        if mats:
+            has_surface = False
+            for m in mats:
+                for n in m.node_tree.nodes:
+                    if n.type == 'OUTPUT_MATERIAL' and n.inputs["Surface"].is_linked:
+                        has_surface = True
+            if not has_surface:
+                return True
+    return False
+
 def _vm_world_bbox(obj):
-    '''物体及其子孙中所有网格的世界坐标包围盒，返回 (min Vector, max Vector)；没有网格时返回 None。'''
+    '''物体及其子孙中所有实体网格的世界坐标包围盒，返回 (min Vector, max Vector)；没有网格时返回 None。'''
     from mathutils import Vector
     pts = []
     for o in _vm_family(obj):
-        if o.type in ('MESH', 'CURVE', 'FONT', 'SURFACE', 'META'):
+        if o.type in ('MESH', 'CURVE', 'FONT', 'SURFACE', 'META') and not _vm_is_volume_or_helper(o):
             pts.extend(o.matrix_world @ Vector(c) for c in o.bound_box)
     if not pts:
         return None
     return (Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts))),
             Vector((max(p.x for p in pts), max(p.y for p in pts), max(p.z for p in pts))))
 
-def _vm_ray(origin, direction, ignore_names, max_dist=1000.0, max_skips=16):
-    '''射线检测，跳过 ignore_names 里的物体，返回 (位置, 法线, 物体) 或 None。'''
+def _vm_ray(origin, direction, ignore_names, max_dist=1000.0, max_skips=24):
+    '''射线检测，自动跳过 ignore_names 与体积雾盒，返回 (位置, 法线, 物体) 或 None。'''
     from mathutils import Vector
     scene = bpy.context.scene
     dg = bpy.context.evaluated_depsgraph_get()
@@ -44,9 +68,10 @@ def _vm_ray(origin, direction, ignore_names, max_dist=1000.0, max_skips=16):
         hit, loc, nor, _idx, hit_obj, _m = scene.ray_cast(dg, o, d, distance=max_dist - travelled)
         if not hit:
             return None
-        name = hit_obj.original.name if hasattr(hit_obj, "original") else hit_obj.name
-        if name not in ignore_names:
-            return (loc, nor, hit_obj)
+        orig_obj = hit_obj.original if hasattr(hit_obj, "original") else hit_obj
+        name = orig_obj.name
+        if name not in ignore_names and not _vm_is_volume_or_helper(orig_obj):
+            return (loc, nor, orig_obj)
         travelled += (loc - o).length + 1e-4
         o = loc + d * 1e-4
     return None
@@ -68,7 +93,7 @@ def snap_to_ground(obj, mode="average", sink=0.02, align_to_normal=False, ignore
     bpy.context.view_layer.update()
     bb = _vm_world_bbox(obj)
     if bb is None:
-        print(f"[Placement] {obj.name} 没有网格，无法贴地")
+        print(f"[Placement] {obj.name} 没有实体网格，无法贴地")
         return None
     mn, mx = bb
     ignore_names = {o.name for o in _vm_family(obj)} | {o.name for o in (ignore or [])}
@@ -105,22 +130,37 @@ def snap_to_ground(obj, mode="average", sink=0.02, align_to_normal=False, ignore
 """,
 
     "preflight_check": """
-def preflight_check(subjects, camera=None, min_coverage=0.03, max_coverage=0.70, float_tolerance=0.05):
+def preflight_check(
+    subjects,
+    camera=None,
+    spatial_mode="grounded",
+    min_coverage=0.025,
+    max_coverage=0.75,
+    float_tolerance=0.06,
+):
     '''
-    渲染前检查。subjects 是主角物体列表（导入模型传它的空物体父级）。
-    检查项：相机是否存在、相机是否钻进物体或地下、主角是否在画面内、主角占画面比例、
-            主角有没有被别的东西挡住、主角有没有浮空或陷进地里。
-    打印一行 [VM_PREFLIGHT] {...}，返回 {"ok": bool, "issues": [...], "subjects": {...}}。
-    有 issues 时先修好再渲染，不要带着问题出图。
+    渲染前空间体检。
+    spatial_mode:
+      - "grounded"（默认贴地场景）：检查相机、主角构图与遮挡、主角及近中景配景/远山悬空漏底、方形地面边缘穿帮
+      - "interior"（封闭室内/阈限大厅/多层中庭）：允许建筑结构大画幅包裹，豁免地面边缘检查
+      - "floating"（超现实失重/非欧空间）：豁免浮空与相机在地下误报
+      - "framed"（窗框/纱帘近景框景）：适配框景构图，豁免远端地面边缘检查
     '''
     import json
+    import math as _m
     from mathutils import Vector
     from bpy_extras.object_utils import world_to_camera_view
+
     scene = bpy.context.scene
     bpy.context.view_layer.update()
     cam = camera or scene.camera
+    mode = str(spatial_mode or "grounded").lower().strip()
+    if mode in ("interior", "framed"):
+        max_coverage = max(max_coverage, 0.94)
+
     issues = []
-    report = {"ok": True, "issues": issues, "subjects": {}}
+    warnings = []
+    report = {"ok": True, "spatial_mode": mode, "issues": issues, "warnings": warnings, "subjects": {}}
     if cam is None:
         issues.append("场景里没有相机")
         report["ok"] = False
@@ -128,24 +168,49 @@ def preflight_check(subjects, camera=None, min_coverage=0.03, max_coverage=0.70,
         return report
 
     cam_loc = cam.matrix_world.translation.copy()
-    # 相机是否在某个物体的包围盒里面
-    for o in scene.objects:
-        if o.type != 'MESH' or o.hide_render:
-            continue
-        bb = _vm_world_bbox(o)
-        if bb is None:
-            continue
-        mn, mx = bb
-        thin = min(mx.x - mn.x, mx.y - mn.y, mx.z - mn.z) < 0.05
-        if not thin and all(mn[i] < cam_loc[i] < mx[i] for i in range(3)):
-            issues.append(f"相机位于物体 {o.name} 的包围盒内部，可能钻进了物体里")
-    # 相机是否在地面以下：向上打射线碰到东西、向下却什么都没碰到
-    up = _vm_ray(cam_loc, (0, 0, 1), {cam.name})
-    down = _vm_ray(cam_loc, (0, 0, -1), {cam.name})
-    if up is not None and down is None:
-        issues.append(f"相机可能在地面以下（上方有 {up[2].name}，下方是空的）")
 
-    for subj in subjects:
+    # 1. 相机是否钻进了实体薄壳之外的实心网格内部（跳过大型室内外壳的整体包围盒，改测超近距离贴墙）
+    near_hit = _vm_ray(cam_loc, cam.matrix_world.to_quaternion() @ Vector((0, 0, -1)), {cam.name}, max_dist=0.18)
+    if near_hit is not None:
+        issues.append(f"相机镜头前 18cm 内被 {near_hit[2].name} 死死贴脸挡住，可能穿墙或机位太近")
+
+    if mode != "interior":
+        for o in scene.objects:
+            if o.type != 'MESH' or o.hide_render or _vm_is_volume_or_helper(o):
+                continue
+            bb = _vm_world_bbox(o)
+            if bb is None:
+                continue
+            mn, mx = bb
+            dims = (mx.x - mn.x, mx.y - mn.y, mx.z - mn.z)
+            # 跳过空腔房间组件或超大地形包围盒，只抓实心道具/岩石穿模
+            if min(dims) >= 0.08 and max(dims) < 12.0 and all(mn[i] < cam_loc[i] < mx[i] for i in range(3)):
+                issues.append(f"相机位于实体物体 {o.name} 内部，可能钻进了模型里")
+
+    # 2. 贴地模式下检查相机是否掉到地面以下
+    if mode == "grounded":
+        up = _vm_ray(cam_loc, (0, 0, 1), {cam.name})
+        down = _vm_ray(cam_loc, (0, 0, -1), {cam.name})
+        if up is not None and down is None:
+            issues.append(f"相机可能在地面以下（上方有 {up[2].name}，下方是空的）")
+
+    # 找出主地面（供全场景浮空与方边穿帮检查）
+    ground_candidates = []
+    for o in scene.objects:
+        if o.type == 'MESH' and not o.hide_render and not _vm_is_volume_or_helper(o) and o.parent is None:
+            bb = _vm_world_bbox(o)
+            if bb:
+                mn, mx = bb
+                area = (mx.x - mn.x) * (mx.y - mn.y)
+                if area > 100.0 and mn.z <= 1.5 and (mx.z - mn.z) < max(mx.x - mn.x, mx.y - mn.y) * 0.35:
+                    ground_candidates.append((area, o, mn, mx))
+    ground_candidates.sort(key=lambda x: -x[0])
+    main_ground = ground_candidates[0][1] if ground_candidates else None
+
+    subject_family_all = set()
+    for subj in (subjects or []):
+        for fo in _vm_family(subj):
+            subject_family_all.add(fo.name)
         bb = _vm_world_bbox(subj)
         if bb is None:
             continue
@@ -171,42 +236,173 @@ def preflight_check(subjects, camera=None, min_coverage=0.03, max_coverage=0.70,
             })
             if coverage <= 0:
                 issues.append(f"{subj.name} 完全在画面外")
-            elif visible_ratio < 0.85:
+            elif mode == "grounded" and visible_ratio < 0.75 and full_area < 0.85:
                 issues.append(f"{subj.name} 有 {round((1 - visible_ratio) * 100)}% 被画面边缘裁掉")
             if 0 < coverage < min_coverage:
                 issues.append(f"{subj.name} 只占画面 {coverage:.1%}，太小看不清")
             if coverage > max_coverage:
                 issues.append(f"{subj.name} 占画面 {coverage:.1%}，太大撑满了")
-        # 遮挡：从相机向主角中心打射线，看第一个碰到的是不是主角自己
+
+        # 多采样点遮挡检测（中心 + 4 个内缩角点，至少 4 点被非透光实心物挡住才报遮挡，避免前景细杆/纱帘误报）
         center = (mn + mx) / 2
         fam_names = {o.name for o in _vm_family(subj)}
-        hit = _vm_ray(cam_loc, center - cam_loc, {cam.name}, max_dist=(center - cam_loc).length + 1.0)
-        if hit is not None:
-            hit_name = hit[2].original.name if hasattr(hit[2], "original") else hit[2].name
-            if hit_name not in fam_names:
-                issues.append(f"{subj.name} 被 {hit_name} 挡住了")
-                info["occluded_by"] = hit_name
-        # 浮空 / 陷地：脚下 5 个采样点，任何一点碰到地面就不算浮空；平均高度用来判断陷得多深
-        fam_hits = []
-        hx, hy = (mx.x - mn.x) * 0.4, (mx.y - mn.y) * 0.4
-        bcx, bcy = (mn.x + mx.x) / 2, (mn.y + mx.y) / 2
-        for (x, y) in [(bcx, bcy), (bcx - hx, bcy - hy), (bcx + hx, bcy - hy), (bcx - hx, bcy + hy), (bcx + hx, bcy + hy)]:
-            g = _vm_ray((x, y, mx.z + 100.0), (0, 0, -1), fam_names)
-            if g is not None:
-                fam_hits.append(g[0].z)
-        if fam_hits:
-            gap = mn.z - max(fam_hits)
-            sink_depth = (sum(fam_hits) / len(fam_hits)) - mn.z
-            info["gap_to_ground"] = round(gap, 3)
-            if gap > float_tolerance:
-                issues.append(f"{subj.name} 底部离地 {gap:.2f} 米，浮在空中（用 snap_to_ground 修正）")
-            elif sink_depth > 0.25 * max(0.01, mx.z - mn.z):
-                issues.append(f"{subj.name} 陷进地面约 {sink_depth:.2f} 米，埋得太深")
+        sx, sy, sz = (mx.x - mn.x) * 0.22, (mx.y - mn.y) * 0.22, (mx.z - mn.z) * 0.22
+        test_pts = [
+            center,
+            center + Vector((-sx, 0, sz)),
+            center + Vector((sx, 0, sz)),
+            center + Vector((-sx, 0, -sz)),
+            center + Vector((sx, 0, -sz)),
+        ]
+        blockers = []
+        for tp in test_pts:
+            dist = (tp - cam_loc).length
+            if dist < 0.05:
+                continue
+            hit = _vm_ray(cam_loc, tp - cam_loc, {cam.name}, max_dist=dist - 0.05)
+            if hit is not None and hit[2].name not in fam_names and not hit[2].get("vm_allow_float"):
+                blockers.append(hit[2].name)
+        if len(blockers) >= 4:
+            top_blocker = max(set(blockers), key=blockers.count)
+            issues.append(f"{subj.name} 大部分被 {top_blocker} 挡住了")
+            info["occluded_by"] = top_blocker
+
+        # 贴地模式下检查主角浮空 / 陷地
+        if mode == "grounded" and not subj.get("vm_allow_float") and subj != main_ground:
+            fam_hits = []
+            hx, hy = (mx.x - mn.x) * 0.4, (mx.y - mn.y) * 0.4
+            bcx, bcy = (mn.x + mx.x) / 2, (mn.y + mx.y) / 2
+            for (x, y) in [(bcx, bcy), (bcx - hx, bcy - hy), (bcx + hx, bcy - hy), (bcx - hx, bcy + hy), (bcx + hx, bcy + hy)]:
+                g = _vm_ray((x, y, mx.z + 100.0), (0, 0, -1), fam_names)
+                if g is not None:
+                    fam_hits.append(g[0].z)
+            if fam_hits:
+                gap = mn.z - max(fam_hits)
+                sink_depth = (sum(fam_hits) / len(fam_hits)) - mn.z
+                info["gap_to_ground"] = round(gap, 3)
+                if gap > float_tolerance:
+                    issues.append(f"{subj.name} 底部离地 {gap:.2f} 米，浮在空中（用 snap_to_ground 修正）")
+                elif sink_depth > 0.30 * max(0.05, mx.z - mn.z):
+                    issues.append(f"{subj.name} 陷进地面约 {sink_depth:.2f} 米，埋得太深")
+            else:
+                issues.append(f"{subj.name} 正下方没有任何地面承接，悬在半空")
         report["subjects"][subj.name] = info
+
+    # 3. 贴地模式下：全场景排查非主角大件配景与远山悬空漏底（抓“前景巨石悬空”和“远山悬在半空漏出底边天空”）
+    if mode == "grounded":
+        checked_roots = set()
+        for o in scene.objects:
+            if o.hide_render or _vm_is_volume_or_helper(o):
+                continue
+            root = o
+            while root.parent is not None:
+                root = root.parent
+            if root.name in checked_roots or root.name in subject_family_all or root == main_ground:
+                continue
+            checked_roots.add(root.name)
+            if root.get("vm_allow_float"):
+                continue
+            # 跳过隐藏散布源或灯光相机
+            if root.type not in ('MESH', 'EMPTY'):
+                continue
+            vis_meshes = [m for m in _vm_family(root) if m.type == 'MESH' and not m.hide_render and not _vm_is_volume_or_helper(m)]
+            if not vis_meshes:
+                continue
+            bb = _vm_world_bbox(root)
+            if bb is None:
+                continue
+            mn, mx = bb
+            # 只检查画面视野前方的可见物体
+            corners = [Vector((x, y, z)) for x in (mn.x, mx.x) for y in (mn.y, mx.y) for z in (mn.z, mx.z)]
+            proj = [world_to_camera_view(scene, cam, c) for c in corners]
+            if not any(p.z > 0 and -0.1 <= p.x <= 1.1 and -0.1 <= p.y <= 1.1 for p in proj):
+                continue
+            fam_names = {fo.name for fo in _vm_family(root)}
+            hx, hy = (mx.x - mn.x) * 0.38, (mx.y - mn.y) * 0.38
+            bcx, bcy = (mn.x + mx.x) / 2, (mn.y + mx.y) / 2
+            hits = []
+            for (x, y) in [(bcx, bcy), (bcx - hx, bcy - hy), (bcx + hx, bcy - hy), (bcx - hx, bcy + hy), (bcx + hx, bcy + hy)]:
+                g = _vm_ray((x, y, mx.z + 100.0), (0, 0, -1), fam_names)
+                if g is not None:
+                    hits.append(g[0].z)
+            if hits:
+                gap = mn.z - max(hits)
+                if gap > max(float_tolerance, 0.12):
+                    issues.append(f"配景/远山 {root.name} 底部悬空 {gap:.2f} 米（请用 snap_to_ground 贴地，远山请用 build_grounded_backdrop_ridge 把底座扎入地下）")
+            elif mn.z > 0.25:
+                issues.append(f"配景/远山 {root.name} (最低点 Z={mn.z:.2f}m) 下方无地面且未扎入地下 Z<=0，在镜头里会悬空漏底")
+
+        # 4. 贴地模式下：检查方形小地面边缘是否在镜头中后景直接穿帮露出断口
+        if main_ground is not None:
+            _, _, gmn, gmx = ground_candidates[0]
+            span = min(gmx.x - gmn.x, gmx.y - gmn.y)
+            if span < 65.0:
+                edge_pts = []
+                for t_i in range(9):
+                    f = t_i / 8.0
+                    edge_pts.extend([
+                        Vector((gmn.x + (gmx.x - gmn.x) * f, gmn.y, gmx.z)),
+                        Vector((gmn.x + (gmx.x - gmn.x) * f, gmx.y, gmx.z)),
+                        Vector((gmn.x, gmn.y + (gmx.y - gmn.y) * f, gmx.z)),
+                        Vector((gmx.x, gmn.y + (gmx.y - gmn.y) * f, gmx.z)),
+                    ])
+                exposed = 0
+                for ep in edge_pts:
+                    pv = world_to_camera_view(scene, cam, ep)
+                    if pv.z > 0 and 0.06 < pv.x < 0.94 and 0.06 < pv.y < 0.88:
+                        # 看从相机到该边缘点之间有没有墙或山挡住
+                        d = (ep - cam_loc).length
+                        h = _vm_ray(cam_loc, ep - cam_loc, {cam.name, main_ground.name}, max_dist=max(0.1, d - 0.3))
+                        if h is None:
+                            exposed += 1
+                if exposed >= 2:
+                    issues.append(
+                        f"地面 {main_ground.name} 尺寸偏小({gmx.x-gmn.x:.0f}x{gmx.y-gmn.y:.0f}m)，生硬的地面断口边缘在画面内直接穿帮（请改用 build_endless_ground(radius=95) 或用围墙/远山遮挡边界）"
+                    )
 
     report["ok"] = not issues
     print("[VM_PREFLIGHT] " + json.dumps(report, ensure_ascii=False))
     return report
+""",
+
+    "check_render_exposure": """
+def check_render_exposure(image_path, spatial_mode="grounded"):
+    '''
+    渲染完成后抽样检查输出图片的像素明暗分布，拦截“室内忘记开灯导致全图死黑”或“严重过曝全白”。
+    返回 {"mean_luma": float, "dark_ratio": float, "bright_ratio": float, "issue": str|None}
+    '''
+    import os
+    if not image_path or not os.path.exists(image_path):
+        return None
+    img = bpy.data.images.load(image_path, check_existing=False)
+    try:
+        w, h = img.size[0], img.size[1]
+        total_px = max(1, w * h)
+        # 抽样最多约 4000 个像素点，耗时 < 5ms
+        step_px = max(1, total_px // 4096)
+        px = img.pixels[:]
+        lumas = []
+        for idx in range(0, total_px * 4, step_px * 4):
+            r, g, b = px[idx], px[idx + 1], px[idx + 2]
+            lumas.append(0.2126 * r + 0.7152 * g + 0.0722 * b)
+        if not lumas:
+            return None
+        mean_luma = sum(lumas) / len(lumas)
+        dark_ratio = sum(1 for v in lumas if v < 0.025) / len(lumas)
+        bright_ratio = sum(1 for v in lumas if v > 0.97) / len(lumas)
+        issue = None
+        if mean_luma < 0.022 or dark_ratio > 0.92:
+            issue = f"渲染画面几乎全黑（平均亮度 {mean_luma:.3f}，暗部占比 {dark_ratio:.0%}），请检查灯光能量、室内天窗/补光或体积雾是否过浓"
+        elif mean_luma > 0.94 and bright_ratio > 0.88:
+            issue = f"渲染画面严重过曝死白（平均亮度 {mean_luma:.3f}，死白占比 {bright_ratio:.0%}），请调低灯光/HDRI 强度或 exposure"
+        return {
+            "mean_luma": round(mean_luma, 4),
+            "dark_ratio": round(dark_ratio, 4),
+            "bright_ratio": round(bright_ratio, 4),
+            "issue": issue,
+        }
+    finally:
+        bpy.data.images.remove(img)
 """,
 
     "scene_diagnostics": """
@@ -220,7 +416,7 @@ def scene_diagnostics():
     data = {"objects": [], "lights": [], "camera": None, "world": None}
     all_pts = []
     for o in scene.objects:
-        if o.type == 'MESH' and not o.hide_render:
+        if o.type == 'MESH' and not o.hide_render and not _vm_is_volume_or_helper(o):
             bb = _vm_world_bbox(o)
             if bb:
                 all_pts += [bb[0], bb[1]]
@@ -239,7 +435,9 @@ def scene_diagnostics():
         fwd = cam.matrix_world.to_quaternion() @ Vector((0, 0, -1))
         dof = cam.data.dof
         data["camera"] = {"name": cam.name, "location": r(cam.matrix_world.translation), "looking": r(fwd),
-                          "lens_mm": cam.data.lens, "dof": dof.use_dof,
+                          "lens_mm": cam.data.lens if cam.data.type == 'PERSP' else None,
+                          "cam_type": cam.data.type,
+                          "dof": dof.use_dof,
                           "focus_object": dof.focus_object.name if dof.focus_object else None,
                           "fstop": dof.aperture_fstop}
     w = scene.world
@@ -255,63 +453,101 @@ def scene_diagnostics():
 """,
 
     "render_overview": """
-def render_overview(filepath, resolution=640):
+def render_overview(filepath, resolution=640, subjects=None, spatial_mode="grounded"):
     '''
-    从斜上方拍一张能看到整个场景的辅助图，主相机位置放一个红色箭头指向它的拍摄方向。
-    拍完自动删除临时相机和箭头，恢复原来的相机和渲染设置。
+    从斜上方拍一张聚焦在“主相机 + 核心主体区域”的全景辅助图（主相机位置放红色圆锥箭头）。
+    1. 优先围绕 subjects 与主相机取景，不会被几十米外的远山或大地面把主体拉缩成看不见的小点。
+    2. 在室内模式（spatial_mode=="interior"）或存在 vm_is_ceiling 标记时，自动临时隐藏顶棚天花板并补一盏俯视观察灯，看清房间内部摆位。
     '''
     import math as _m
     from mathutils import Vector
     scene = bpy.context.scene
     bpy.context.view_layer.update()
-    pts = []
+    main_cam = scene.camera
+    mode = str(spatial_mode or "grounded").lower().strip()
+
+    focus_pts = []
+    for subj in (subjects or []):
+        bb = _vm_world_bbox(subj)
+        if bb:
+            # 防止某个超长走廊主体拉得过远，限制单物体对焦半径贡献
+            sc = (bb[0] + bb[1]) * 0.5
+            ext = Vector((min(12.0, (bb[1].x - bb[0].x) * 0.5),
+                          min(12.0, (bb[1].y - bb[0].y) * 0.5),
+                          min(10.0, (bb[1].z - bb[0].z) * 0.5)))
+            focus_pts.extend([sc - ext, sc + ext])
+
+    if main_cam:
+        focus_pts.append(main_cam.matrix_world.translation.copy())
+
+    if len(focus_pts) < 2:
+        for o in scene.objects:
+            if o.type == 'MESH' and not o.hide_render and not _vm_is_volume_or_helper(o):
+                bb = _vm_world_bbox(o)
+                if bb and max(bb[1].x - bb[0].x, bb[1].y - bb[0].y) < 50.0:
+                    focus_pts.extend([bb[0], bb[1]])
+    if not focus_pts:
+        return None
+
+    mn = Vector((min(p.x for p in focus_pts), min(p.y for p in focus_pts), min(p.z for p in focus_pts)))
+    mx = Vector((max(p.x for p in focus_pts), max(p.y for p in focus_pts), max(p.z for p in focus_pts)))
+    center = (mn + mx) * 0.5
+    radius = min(max((mx - mn).length * 0.55, 3.5), 24.0)
+
+    # 室内透视：临时隐藏标记为 vm_is_ceiling 的吊顶，或位于相机上方的大面积水平顶板
+    hidden_ceilings = []
+    cam_z = main_cam.matrix_world.translation.z if main_cam else 1.6
     for o in scene.objects:
-        if o.type == 'MESH' and not o.hide_render:
+        if o.type != 'MESH' or o.hide_render:
+            continue
+        is_ceil = bool(o.get("vm_is_ceiling"))
+        if not is_ceil and mode == "interior":
             bb = _vm_world_bbox(o)
             if bb:
-                pts += [bb[0], bb[1]]
-    if not pts:
-        return None
-    mn = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
-    mx = Vector((max(p.x for p in pts), max(p.y for p in pts), max(p.z for p in pts)))
-    # 太大的地面会把视野拉得很远，范围上限放在主角附近 60 米
-    center = (mn + mx) / 2
-    radius = min(max((mx - mn).length / 2, 1.0), 30.0)
-    main_cam = scene.camera
+                bmn, bmx = bb
+                if bmn.z > cam_z + 0.6 and (bmx.z - bmn.z) < 1.2 and (bmx.x - bmn.x) > 3.0 and (bmx.y - bmn.y) > 3.0:
+                    is_ceil = True
+        if is_ceil:
+            hidden_ceilings.append(o)
+            o.hide_render = True
 
     marker = None
+    tmp_sun = None
     if main_cam:
-        bpy.ops.mesh.primitive_cone_add(radius1=radius * 0.04, depth=radius * 0.12)
+        bpy.ops.mesh.primitive_cone_add(radius1=radius * 0.045, depth=radius * 0.14)
         marker = bpy.context.object
         marker.name = "VM_TMP_CamMarker"
         m = bpy.data.materials.new("VM_TMP_Red")
         m.use_nodes = True
         b = m.node_tree.nodes.get("Principled BSDF")
-        b.inputs["Base Color"].default_value = (1, 0, 0, 1)
+        b.inputs["Base Color"].default_value = (1, 0.05, 0.05, 1)
         if "Emission Color" in b.inputs:
-            b.inputs["Emission Color"].default_value = (1, 0, 0, 1)
-            b.inputs["Emission Strength"].default_value = 5.0
+            b.inputs["Emission Color"].default_value = (1, 0.05, 0.05, 1)
+            b.inputs["Emission Strength"].default_value = 6.0
         marker.data.materials.append(m)
         fwd = main_cam.matrix_world.to_quaternion() @ Vector((0, 0, -1))
         marker.location = main_cam.matrix_world.translation
         marker.rotation_mode = 'QUATERNION'
         marker.rotation_quaternion = Vector((0, 0, 1)).rotation_difference(fwd)
-        pts_cam = main_cam.matrix_world.translation
-        mn = Vector((min(mn.x, pts_cam.x), min(mn.y, pts_cam.y), min(mn.z, pts_cam.z)))
-        mx = Vector((max(mx.x, pts_cam.x), max(mx.y, pts_cam.y), max(mx.z, pts_cam.z)))
-        center = (mn + mx) / 2
-        radius = min(max((mx - mn).length / 2, 1.0), 30.0)
+
+    if hidden_ceilings or mode == "interior":
+        sdata = bpy.data.lights.new("VM_TMP_OverviewSun", 'SUN')
+        sdata.energy = 1.2
+        tmp_sun = bpy.data.objects.new("VM_TMP_OverviewSun", sdata)
+        scene.collection.objects.link(tmp_sun)
+        tmp_sun.rotation_euler = (_m.radians(25), _m.radians(15), _m.radians(-35))
 
     cam_data = bpy.data.cameras.new("VM_TMP_OverviewCam")
-    cam_data.lens = 24
+    cam_data.lens = 26
     cam_obj = bpy.data.objects.new("VM_TMP_OverviewCam", cam_data)
     scene.collection.objects.link(cam_obj)
     fov = 2 * _m.atan(cam_data.sensor_width / (2 * cam_data.lens))
-    dist = radius / _m.sin(fov / 2) * 1.05
-    direction = Vector((1.0, -1.0, 1.1)).normalized()
+    dist = radius / _m.sin(fov / 2) * 1.08
+    # 室内俯视角更陡一点，避免被前墙挡住视线
+    direction = Vector((0.65, -0.85, 1.55 if (hidden_ceilings or mode == "interior") else 1.05)).normalized()
     cam_obj.location = center + direction * dist
     cam_obj.rotation_euler = (center - cam_obj.location).to_track_quat('-Z', 'Y').to_euler()
-    cam_data.clip_end = dist * 4
+    cam_data.clip_end = max(300.0, dist * 5)
 
     saved = (scene.camera, scene.render.filepath, scene.render.resolution_x, scene.render.resolution_y,
              scene.render.engine, scene.render.resolution_percentage)
@@ -329,6 +565,8 @@ def render_overview(filepath, resolution=640):
                 continue
         bpy.ops.render.render(write_still=True)
     finally:
+        for o in hidden_ceilings:
+            o.hide_render = False
         (scene.camera, scene.render.filepath, scene.render.resolution_x, scene.render.resolution_y,
          eng, scene.render.resolution_percentage) = saved
         try:
@@ -337,6 +575,10 @@ def render_overview(filepath, resolution=640):
             pass
         bpy.data.objects.remove(cam_obj, do_unlink=True)
         bpy.data.cameras.remove(cam_data)
+        if tmp_sun:
+            sd = tmp_sun.data
+            bpy.data.objects.remove(tmp_sun, do_unlink=True)
+            bpy.data.lights.remove(sd)
         if marker:
             mat = marker.data.materials[0] if marker.data.materials else None
             mesh = marker.data

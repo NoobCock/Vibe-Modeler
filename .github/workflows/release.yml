@@ -109,6 +109,7 @@ jobs:
           for mod_name, attr in [("templates.materials", "MATERIAL_SNIPPETS"),
                                  ("templates.geo_nodes", "GEO_NODES_SNIPPETS"),
                                  ("templates.modeling", "MODELING_SNIPPETS"),
+                                 ("templates.spatial_archetypes", "SPATIAL_ARCHETYPE_SNIPPETS"),
                                  ("templates.placement", "PLACEMENT_SNIPPETS"),
                                  ("templates.render_pipeline", "RENDER_PIPELINE_SNIPPETS"),
                                  ("templates.lighting_rigs", "LIGHTING_RIG_SNIPPETS")]:

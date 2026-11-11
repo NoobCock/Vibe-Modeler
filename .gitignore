@@ -14,8 +14,10 @@ temp_patch.py
 assets_cache/
 *.zip
 
-# Generated renders, .blend files and per-user rating data
+# Generated renders, .blend files, local reference dumps and per-user rating data
 outputs/
+imageref/
+imageref2/
 user_profile.json
 session_requirements.json
 
