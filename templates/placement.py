@@ -75,6 +75,49 @@ def _vm_ray(origin, direction, ignore_names, max_dist=1000.0, max_skips=24):
         travelled += (loc - o).length + 1e-4
         o = loc + d * 1e-4
     return None
+
+def _vm_ground_ray(x, y, obj_mn_z, obj_mx_z, ignore_names, max_skips=32):
+    '''
+    专用于寻地与贴地体检的向下射线：
+    1. 从物体下半部高度起射（而非 mx.z + 100m），避免把几十米高空的峡谷横梁、天桥栈道或吊顶误判为地面；
+    2. 自动跳过标记了 vm_allow_float / vm_is_ceiling 的物体，以及自身最低点仍显著高于待测物底部的悬空横梁/顶棚。
+    '''
+    from mathutils import Vector
+    scene = bpy.context.scene
+    dg = bpy.context.evaluated_depsgraph_get()
+    obj_h = max(0.1, obj_mx_z - obj_mn_z)
+    start_z = min(obj_mx_z + 0.25, obj_mn_z + max(1.2, obj_h * 0.35))
+    o = Vector((x, y, start_z))
+    d = Vector((0.0, 0.0, -1.0))
+    travelled = 0.0
+    max_dist = 1000.0
+    for _ in range(max_skips):
+        hit, loc, nor, _idx, hit_obj, _m = scene.ray_cast(dg, o, d, distance=max_dist - travelled)
+        if not hit:
+            return None
+        orig_obj = hit_obj.original if hasattr(hit_obj, "original") else hit_obj
+        name = orig_obj.name
+        skip = (
+            name in ignore_names
+            or _vm_is_volume_or_helper(orig_obj)
+            or bool(orig_obj.get("vm_allow_float"))
+            or bool(orig_obj.get("vm_is_ceiling"))
+        )
+        if not skip:
+            root = orig_obj
+            while root.parent is not None:
+                root = root.parent
+            if root.get("vm_allow_float") or root.get("vm_is_ceiling"):
+                skip = True
+            else:
+                hbb = _vm_world_bbox(orig_obj)
+                if hbb is not None and hbb[0].z > obj_mn_z + 1.0:
+                    skip = True
+        if not skip:
+            return (loc, nor, orig_obj)
+        travelled += (loc - o).length + 1e-4
+        o = loc + d * 1e-4
+    return None
 """,
 
     "snap_to_ground": """
@@ -100,11 +143,12 @@ def snap_to_ground(obj, mode="average", sink=0.02, align_to_normal=False, ignore
     cx, cy = (mn.x + mx.x) / 2, (mn.y + mx.y) / 2
     hx, hy = (mx.x - mn.x) * 0.4, (mx.y - mn.y) * 0.4
     samples = [(cx, cy), (cx - hx, cy - hy), (cx + hx, cy - hy), (cx - hx, cy + hy), (cx + hx, cy + hy)]
-    top = mx.z + 100.0
     hits = []
     center_normal = None
     for i, (x, y) in enumerate(samples):
-        h = _vm_ray((x, y, top), (0, 0, -1), ignore_names)
+        h = _vm_ground_ray(x, y, mn.z, mx.z, ignore_names)
+        if h is None:
+            h = _vm_ray((x, y, mx.z + 25.0), (0, 0, -1), ignore_names)
         if h:
             hits.append(h[0].z)
             if i == 0:
@@ -273,7 +317,7 @@ def preflight_check(
             hx, hy = (mx.x - mn.x) * 0.4, (mx.y - mn.y) * 0.4
             bcx, bcy = (mn.x + mx.x) / 2, (mn.y + mx.y) / 2
             for (x, y) in [(bcx, bcy), (bcx - hx, bcy - hy), (bcx + hx, bcy - hy), (bcx - hx, bcy + hy), (bcx + hx, bcy + hy)]:
-                g = _vm_ray((x, y, mx.z + 100.0), (0, 0, -1), fam_names)
+                g = _vm_ground_ray(x, y, mn.z, mx.z, fam_names)
                 if g is not None:
                     fam_hits.append(g[0].z)
             if fam_hits:
@@ -300,7 +344,7 @@ def preflight_check(
             if root.name in checked_roots or root.name in subject_family_all or root == main_ground:
                 continue
             checked_roots.add(root.name)
-            if root.get("vm_allow_float"):
+            if root.get("vm_allow_float") or root.get("vm_is_ceiling"):
                 continue
             # 跳过隐藏散布源或灯光相机
             if root.type not in ('MESH', 'EMPTY'):
@@ -322,7 +366,7 @@ def preflight_check(
             bcx, bcy = (mn.x + mx.x) / 2, (mn.y + mx.y) / 2
             hits = []
             for (x, y) in [(bcx, bcy), (bcx - hx, bcy - hy), (bcx + hx, bcy - hy), (bcx - hx, bcy + hy), (bcx + hx, bcy + hy)]:
-                g = _vm_ray((x, y, mx.z + 100.0), (0, 0, -1), fam_names)
+                g = _vm_ground_ray(x, y, mn.z, mx.z, fam_names)
                 if g is not None:
                     hits.append(g[0].z)
             if hits:
@@ -360,6 +404,29 @@ def preflight_check(
                         f"地面 {main_ground.name} 尺寸偏小({gmx.x-gmn.x:.0f}x{gmx.y-gmn.y:.0f}m)，生硬的地面断口边缘在画面内直接穿帮（请改用 build_endless_ground(radius=95) 或用围墙/远山遮挡边界）"
                     )
 
+    # 5. 立柱 / 支撑柱与上方吊顶脱节检查（拦截柱顶差 10~50cm 没接上天花板的穿帮）
+    if mode in ("interior", "grounded"):
+        for o in scene.objects:
+            if o.type != 'MESH' or o.hide_render or _vm_is_volume_or_helper(o):
+                continue
+            lname = o.name.lower()
+            if not any(k in lname for k in ("pillar", "column", "support_post", "col_")):
+                continue
+            bb = _vm_world_bbox(o)
+            if bb is None:
+                continue
+            mn, mx = bb
+            if (mx.z - mn.z) < 1.8:
+                continue
+            tcx, tcy = (mn.x + mx.x) * 0.5, (mn.y + mx.y) * 0.5
+            up_hit = _vm_ray((tcx, tcy, mx.z - 0.02), (0, 0, 1), {fo.name for fo in _vm_family(o)}, max_dist=0.65)
+            if up_hit is not None:
+                top_gap = up_hit[0].z - mx.z
+                if 0.05 < top_gap < 0.55:
+                    issues.append(
+                        f"立柱 {o.name} 柱顶(Z={mx.z:.2f}m)与上方顶板 {up_hit[2].name}(Z={up_hit[0].z:.2f}m) 之间悬空脱节 {top_gap:.2f} 米，请拉高柱高嵌入顶板"
+                    )
+
     report["ok"] = not issues
     print("[VM_PREFLIGHT] " + json.dumps(report, ensure_ascii=False))
     return report
@@ -368,41 +435,117 @@ def preflight_check(
     "check_render_exposure": """
 def check_render_exposure(image_path, spatial_mode="grounded"):
     '''
-    渲染完成后抽样检查输出图片的像素明暗分布，拦截“室内忘记开灯导致全图死黑”或“严重过曝全白”。
-    返回 {"mean_luma": float, "dark_ratio": float, "bright_ratio": float, "issue": str|None}
+    渲染完成后对输出图片做全局 + 九宫格（3x3 分区）亮度与对比度体检：
+    1. 拦截全局死黑欠曝或全局死白过曝；
+    2. 拦截九宫格局部强光死白过曝（例如聚光灯怼脸把前景窗框/墙面照成一片纯白）；
+    3. 拦截全图灰蒙蒙缺乏光影层次（动态范围 p95 - p05 过窄或标准差过低）；
+    4. 生成针对性的 Blender Compositor 后处理建议（post_process_recommendations）。
     '''
     import os
+    import math as _m
     if not image_path or not os.path.exists(image_path):
         return None
     img = bpy.data.images.load(image_path, check_existing=False)
     try:
         w, h = img.size[0], img.size[1]
-        total_px = max(1, w * h)
-        # 抽样最多约 4000 个像素点，耗时 < 5ms
-        step_px = max(1, total_px // 4096)
+        if w <= 0 or h <= 0:
+            return None
         px = img.pixels[:]
+        grid_lumas = [[[] for _ in range(3)] for _ in range(3)]
         lumas = []
-        for idx in range(0, total_px * 4, step_px * 4):
-            r, g, b = px[idx], px[idx + 1], px[idx + 2]
-            lumas.append(0.2126 * r + 0.7152 * g + 0.0722 * b)
+        step_x = max(1, w // 64)
+        step_y = max(1, h // 64)
+        for y in range(0, h, step_y):
+            gy = min(2, (y * 3) // h)
+            row_off = y * w * 4
+            for x in range(0, w, step_x):
+                gx = min(2, (x * 3) // w)
+                idx = row_off + x * 4
+                r, g, b = px[idx], px[idx + 1], px[idx + 2]
+                lv = 0.2126 * r + 0.7152 * g + 0.0722 * b
+                lumas.append(lv)
+                grid_lumas[gy][gx].append(lv)
         if not lumas:
             return None
-        mean_luma = sum(lumas) / len(lumas)
-        dark_ratio = sum(1 for v in lumas if v < 0.025) / len(lumas)
-        bright_ratio = sum(1 for v in lumas if v > 0.97) / len(lumas)
+        lumas_sorted = sorted(lumas)
+        n = len(lumas_sorted)
+        mean_luma = sum(lumas_sorted) / n
+        variance = sum((v - mean_luma) ** 2 for v in lumas_sorted) / n
+        std_luma = _m.sqrt(variance)
+        p05 = lumas_sorted[min(n - 1, int(n * 0.05))]
+        p95 = lumas_sorted[min(n - 1, int(n * 0.95))]
+        dynamic_range = p95 - p05
+        dark_ratio = sum(1 for v in lumas_sorted if v < 0.025) / n
+        bright_ratio = sum(1 for v in lumas_sorted if v > 0.96) / n
+
+        cell_bright_ratios = []
+        cell_dark_ratios = []
+        blown_cells = []
+        zone_names = [
+            ["左下", "中下", "右下"],
+            ["左中", "中心", "右中"],
+            ["左上", "中上", "右上"],
+        ]
+        for gy in range(3):
+            for gx in range(3):
+                cl = grid_lumas[gy][gx]
+                if not cl:
+                    continue
+                cb = sum(1 for v in cl if v > 0.96) / len(cl)
+                cd = sum(1 for v in cl if v < 0.022) / len(cl)
+                cmean = sum(cl) / len(cl)
+                cell_bright_ratios.append(cb)
+                cell_dark_ratios.append(cd)
+                if cb > 0.50 and cmean > 0.86:
+                    blown_cells.append(f"{zone_names[gy][gx]}区(死白占{cb:.0%})")
+
+        max_cell_bright = max(cell_bright_ratios) if cell_bright_ratios else 0.0
+        max_cell_dark = max(cell_dark_ratios) if cell_dark_ratios else 0.0
+
         issue = None
-        if mean_luma < 0.022 or dark_ratio > 0.92:
+        warnings = []
+        recommendations = []
+
+        if mean_luma < 0.022 or dark_ratio > 0.90:
             issue = f"渲染画面几乎全黑（平均亮度 {mean_luma:.3f}，暗部占比 {dark_ratio:.0%}），请检查灯光能量、室内天窗/补光或体积雾是否过浓"
-        elif mean_luma > 0.94 and bright_ratio > 0.88:
-            issue = f"渲染画面严重过曝死白（平均亮度 {mean_luma:.3f}，死白占比 {bright_ratio:.0%}），请调低灯光/HDRI 强度或 exposure"
+        elif mean_luma > 0.92 and bright_ratio > 0.82:
+            issue = f"渲染画面全局严重过曝死白（平均亮度 {mean_luma:.3f}，死白占比 {bright_ratio:.0%}），请调低灯光/HDRI 强度或 exposure"
+        elif blown_cells:
+            issue = f"画面局部区域严重过曝死白：{', '.join(blown_cells)}，请检查是否有高能量聚光灯/面光过近直怼前景或墙面"
+        elif dynamic_range < 0.14 and std_luma < 0.045:
+            issue = f"画面整体灰蒙发平、缺乏明暗层次（动态范围仅 {dynamic_range:.2f}，亮度标准差 {std_luma:.3f}），请拉开主光与环境补光光比，或开启 AgX - Medium High Contrast 与后期对比度"
+
+        if not issue:
+            if max_cell_bright > 0.30 or bright_ratio > 0.12:
+                warnings.append(f"局部高光偏强（最亮九宫格死白占比 {max_cell_bright:.0%}），建议开启后期 Glare 柔化高光边缘或微降 exposure")
+                recommendations.append("开启 Glare (Bloom / Fog Glow) 柔化高光硬边")
+            if dynamic_range < 0.28 or std_luma < 0.085:
+                warnings.append(f"画面明暗反差偏温和（动态范围 {dynamic_range:.2f}），建议在后处理中开启 ao_boost 与 contrast_saturation 强化立体感")
+                recommendations.append("开启 ao_boost + contrast_saturation + vignette 提升空间纵深与立体反差")
+            if dark_ratio > 0.65 and str(spatial_mode).lower() != "floating":
+                warnings.append(f"暗部面积偏大（占 {dark_ratio:.0%}），注意确认暗部建筑结构细节是否可读")
+                recommendations.append("适当使用 color_balance 抬升暗部 Lift 或补充微弱体积雾/反射补光")
+            if not recommendations:
+                recommendations.append("可叠加 Mist 景深雾气 + 微弱色散 (dispersion=0.008) + 暗角 (vignette) 消除 CG 塑料硬边感")
+
         return {
             "mean_luma": round(mean_luma, 4),
+            "std_luma": round(std_luma, 4),
+            "p05_luma": round(p05, 4),
+            "p95_luma": round(p95, 4),
+            "dynamic_range": round(dynamic_range, 4),
             "dark_ratio": round(dark_ratio, 4),
             "bright_ratio": round(bright_ratio, 4),
+            "max_cell_bright_ratio": round(max_cell_bright, 4),
+            "max_cell_dark_ratio": round(max_cell_dark, 4),
             "issue": issue,
+            "warnings": warnings,
+            "post_process_recommendations": recommendations,
         }
     finally:
         bpy.data.images.remove(img)
+
+check_render_quality = check_render_exposure
 """,
 
     "scene_diagnostics": """
@@ -457,7 +600,8 @@ def render_overview(filepath, resolution=640, subjects=None, spatial_mode="groun
     '''
     从斜上方拍一张聚焦在“主相机 + 核心主体区域”的全景辅助图（主相机位置放红色圆锥箭头）。
     1. 优先围绕 subjects 与主相机取景，不会被几十米外的远山或大地面把主体拉缩成看不见的小点。
-    2. 在室内模式（spatial_mode=="interior"）或存在 vm_is_ceiling 标记时，自动临时隐藏顶棚天花板并补一盏俯视观察灯，看清房间内部摆位。
+    2. 在室内模式（spatial_mode=="interior"）或存在 vm_is_ceiling 标记时，自动临时隐藏顶棚天花板并补一盏俯视观察灯。
+    3. 自动检测并临时隐藏挡在俯视相机与核心主体视线之间的高大峡谷侧墙/走廊高墙（如 50m 高的 Canyon MassWall），确保全景图不变成白墙。
     '''
     import math as _m
     from mathutils import Vector
@@ -466,8 +610,11 @@ def render_overview(filepath, resolution=640, subjects=None, spatial_mode="groun
     main_cam = scene.camera
     mode = str(spatial_mode or "grounded").lower().strip()
 
+    subj_names = set()
     focus_pts = []
     for subj in (subjects or []):
+        for fo in _vm_family(subj):
+            subj_names.add(fo.name)
         bb = _vm_world_bbox(subj)
         if bb:
             # 防止某个超长走廊主体拉得过远，限制单物体对焦半径贡献
@@ -511,6 +658,45 @@ def render_overview(filepath, resolution=640, subjects=None, spatial_mode="groun
             hidden_ceilings.append(o)
             o.hide_render = True
 
+    cam_data = bpy.data.cameras.new("VM_TMP_OverviewCam")
+    cam_data.lens = 26
+    cam_obj = bpy.data.objects.new("VM_TMP_OverviewCam", cam_data)
+    scene.collection.objects.link(cam_obj)
+    fov = 2 * _m.atan(cam_data.sensor_width / (2 * cam_data.lens))
+    dist = radius / _m.sin(fov / 2) * 1.08
+    direction = Vector((0.65, -0.85, 1.55 if (hidden_ceilings or mode == "interior") else 1.05)).normalized()
+    cam_obj.location = center + direction * dist
+    cam_obj.rotation_euler = (center - cam_obj.location).to_track_quat('-Z', 'Y').to_euler()
+    cam_data.clip_end = max(300.0, dist * 5)
+    bpy.context.view_layer.update()
+
+    # 峡谷/高墙剖切透视：若俯视相机到中心焦点之间被高大侧墙（高 > 4.5m）挡死，自动临时隐藏该遮挡墙体
+    probe_targets = [center, center + Vector((0, 0, 1.5)), center + Vector((0, -3.0, 1.0)), center + Vector((0, 3.0, 1.0))]
+    if main_cam:
+        probe_targets.append(main_cam.matrix_world.translation.copy())
+    for pt in probe_targets:
+        for _ in range(8):
+            ray_vec = pt - cam_obj.location
+            ray_len = ray_vec.length
+            if ray_len < 0.2:
+                break
+            hit = _vm_ray(
+                cam_obj.location,
+                ray_vec,
+                {cam_obj.name} | subj_names | {o.name for o in hidden_ceilings},
+                max_dist=ray_len - 0.15,
+            )
+            if hit is None:
+                break
+            ho = hit[2]
+            hbb = _vm_world_bbox(ho)
+            if hbb is not None and (hbb[1].z - hbb[0].z) > 4.5:
+                hidden_ceilings.append(ho)
+                ho.hide_render = True
+                bpy.context.view_layer.update()
+            else:
+                break
+
     marker = None
     tmp_sun = None
     if main_cam:
@@ -536,18 +722,6 @@ def render_overview(filepath, resolution=640, subjects=None, spatial_mode="groun
         tmp_sun = bpy.data.objects.new("VM_TMP_OverviewSun", sdata)
         scene.collection.objects.link(tmp_sun)
         tmp_sun.rotation_euler = (_m.radians(25), _m.radians(15), _m.radians(-35))
-
-    cam_data = bpy.data.cameras.new("VM_TMP_OverviewCam")
-    cam_data.lens = 26
-    cam_obj = bpy.data.objects.new("VM_TMP_OverviewCam", cam_data)
-    scene.collection.objects.link(cam_obj)
-    fov = 2 * _m.atan(cam_data.sensor_width / (2 * cam_data.lens))
-    dist = radius / _m.sin(fov / 2) * 1.08
-    # 室内俯视角更陡一点，避免被前墙挡住视线
-    direction = Vector((0.65, -0.85, 1.55 if (hidden_ceilings or mode == "interior") else 1.05)).normalized()
-    cam_obj.location = center + direction * dist
-    cam_obj.rotation_euler = (center - cam_obj.location).to_track_quat('-Z', 'Y').to_euler()
-    cam_data.clip_end = max(300.0, dist * 5)
 
     saved = (scene.camera, scene.render.filepath, scene.render.resolution_x, scene.render.resolution_y,
              scene.render.engine, scene.render.resolution_percentage)

@@ -128,17 +128,23 @@ python scripts/blender_finder.py --json
 4. **前/中/后景坐标带**：前景遮挡物 `Y` 区间、中景核心构筑物 `Y/Z` 区间、远景闭合层 `Y/Z` 区间，核对包围盒不互相穿插悬空。
 5. **防死黑布光核对**：封闭室内必须同时具备“门窗进光/天窗灯带 + 室内柔和补光面光”；体积雾一律用有界雾盒，严禁全局浓雾吞黑天空。
 
-### 1. 怎么调用执行器
-把脚本拆成三段交给 [`scripts/blender_runner.py`](scripts/blender_runner.py)（`templates/` 下所有空间骨架、材质、几何节点、建模、摆放与渲染函数会自动注入，**直接调用，不要复制模板源码**）：
+### 1. 怎么调用执行器（单会话固定复用同一个 `output_dir`）
+把脚本拆成三段交给 [`scripts/blender_runner.py`](scripts/blender_runner.py)（`templates/` 下所有空间骨架、材质、几何节点、建模、摆放与渲染后期函数会自动注入，**直接调用，不要复制模板源码**）。
+> **严禁每次重跑预览都新建文件夹**：在开始写代码前**只调用一次** `out_dir = br.new_output_dir("简短英文标签")`，后续所有 `preview` 重试、`final` 正式渲染、`run_post_process` 后期调色与 `run_incremental_patch` 增量改图**必须全程复用同一个 `out_dir`**，严禁在循环或重试里反复调用 `new_output_dir` 产生七八个碎片目录！
+
 ```python
 from scripts import blender_runner as br
+out_dir = br.new_output_dir("简短英文标签")  # 全程只建一次！
 settings = {
     "mode": "preview",                 # 自审一律先用 preview (EEVEE)；通过后再改 "final" (Cycles)
     "spatial_mode": "interior",        # 必填："interior" | "grounded" | "floating" | "framed"
     "width": 1920, "height": 1080,     # 竖屏巨构/中庭常用 1080x1920 或 1350x1800
     "subjects": ["主角或核心结构空物体名"],
-    "output_dir": br.new_output_dir("简短英文标签"),
-    # 可选："bloom": {"glare_type": "Bloom", "threshold": 0.9, "strength": 0.35}, "view": "AgX", "look": "AgX - Medium High Contrast"
+    "output_dir": out_dir,             # 预览、正式出图、后期与改图全程复用同一个 out_dir
+    "view": "AgX",
+    "look": "AgX - Medium High Contrast",
+    # 可选：直接指定合成器后处理预设或自定义字典（正式渲染时会自动同时缓存 16-bit MultiLayer raw_cache.exr）
+    "post_process": "sterile_cold_brutalist",  # 可选预设: cinematic_warm / sterile_cold_brutalist / liminal_dream / surreal_ethereal_glow / high_contrast_chiaroscuro / clean_anime
 }
 result = br.run_scene(env_code, mesh_code, camera_code, settings)
 ```
@@ -158,10 +164,15 @@ result = br.run_scene(env_code, mesh_code, camera_code, settings)
   - 室外远山**严禁手写悬空方块或单层翘边网格**，一律用 `build_grounded_backdrop_ridge(distance_y=48.0, span_x=120.0, peak_height=14.0, base_sink=-4.5, mat=...)`，确保山脚深扎入地下 `Z=-4.5m`。
   - 丁达尔斜射光柱用 `create_volumetric_light_beam(source_location=..., target_location=..., box_size=..., density=0.024, spot_energy=2400)`。
 
-### 3. 物体拆件与免费 3D 模型（拒绝简陋积木）
+### 3. 物体拆件、有机曲面部件与人体尺度参照物（拒绝死板积木与比例失真）
 - **每个核心构筑物或焦点道具至少拆成 3 个以上真实结构部件**（如弧形导台要有台体、金属包边压条、踢脚凹槽与台面器物；三角琴要有琴体、支腿、掀开的顶盖、黑白琴键排与踏板架）。
+- **柔性/有机道具严禁用平板方块硬拼**（[`templates/modeling.py`](templates/modeling.py)）：
+  - **翻开的书本与散落书页**：必须调用 `build_curved_open_book(name, location, rotation, width=1.25, depth=0.86, page_arch=0.14, flutter_count=3, mat_cover=..., mat_page=..., allow_float=True)` 生成带 S 型自然拱起书页、圆弧书脊和卷曲漂浮书页的精装书，**严禁用两块倾斜立方体拼成死板积木书**！
+  - **高空悬垂电缆/软管束**：调用 `build_hanging_cables(name, start_pt, end_pt, sag=1.4, count=3, mat_cable=...)` 在峡谷高墙、天桥或失重构件之间拉出自然垂坠的抛物线缆绳，打破横平竖直的机械感。
+- **巨构场景强制加入“人体尺度参照物”**：
+  - 当建造 25~60 米高的粗野主义峡谷、神圣祭坛或多层中庭时，**必须在近中景连桥、平台边缘或基座旁调用 `build_human_scale_railing(name, start_pt, end_pt, height=1.05, mat_rail=...)` 加上 1.05 米标准护栏**（或 `0.18m` 标准踏步台阶、`2.1m` 标准门洞），让观众一眼感知到“1 米护栏 vs 50 米巨塔”的震撼体量反差，彻底消除巨构看起来像 2 米微缩玩具的毛病。
 - **复杂有机体优先搜 CC0 模型**：植物、岩石、座椅、灯具、杂物先用 `asset_loader.search_cc0_assets("models", ["英文关键词"])` 搜索，`download_cc0_model(id)` 下载后用 `import_cc0_model(path, location, rotation_z_deg, target_height)` 按真实米制尺寸导入（注意若模型含 LOD0~LOD3 子网格，只保留 LOD0 渲染）。
-- **手写结构必加倒角与厚度**（[`templates/modeling.py`](templates/modeling.py)）：硬边一律 `add_bevel` 接高光，薄板一律 `add_solidify` 给真实厚度。
+- **手写结构必加倒角、厚度与结构咬合**：硬边一律 `add_bevel` 接高光，薄板一律 `add_solidify` 给真实厚度；室内立柱顶端必须向上嵌入顶板（`Z_top >= ceiling_z + 0.02`），严禁柱顶与天花板之间留出几厘米悬空断缝。
 
 ### 4. 材质三阶梯（写实与粗野/阈限场景严禁纯噪波糊弄）
 - **第一梯队（真实扫描 CC0 PBR 贴图集）**：混凝土、瓷砖、石材、木板、金属、泥地等大面积结构，主动调用 `asset_loader.download_pbr_texture_set(...)` 下载颜色+粗糙度+法线贴图，传给 `setup_pbr_texture_material(..., use_box_mapping=True)`。
@@ -171,25 +182,57 @@ result = br.run_scene(env_code, mesh_code, camera_code, settings)
 
 ### 5. 按空间模式摆放物体
 - `spatial_mode="grounded"`：先建 `build_endless_ground` 与 `build_grounded_backdrop_ridge`，再对所有大件主体、岩石、箱罐逐一调用 `snap_to_ground(obj)`（带腿家具用 `mode="highest"`），最后才调用 `apply_gn_surface_scatter(..., avoid_objects=[...])`。
-- `spatial_mode="floating"`：无需贴地；对在地面模式里故意悬空的局部环带或碎片设置 `obj["vm_allow_float"] = True` 即可豁免浮空报警。
+- `spatial_mode="floating"`：无需贴地；对在地面模式里故意悬空的局部环带、横梁或碎片设置 `obj["vm_allow_float"] = True` 即可豁免浮空报警。
 
 ---
 
-## 五、预览与自审（严禁自我感动）
+## 五、双阶段严苛自审与 Blender 合成器后处理管线（严禁自我感动）
 
-每次跑完 `"mode": "preview"`，按以下顺序严格自检：
+### 阶段 A：Preview 预览期“代码量化门禁 + 6 维视觉清单”（未全部达标严禁进 Final）
+每次跑完 `"mode": "preview"`，必须按以下顺序逐项核验：
 
-1. **先看自动体检报告 `result["report"]`**：
-   - `preflight.issues` 非空（例如：主角/配景/远山悬空、方形地面断口在镜头内穿帮、相机贴墙挡死、渲染画面全黑欠曝或全白过曝）：**必须先按提示修好重跑预览，严禁带病出正式图**。
+1. **先过代码量化门禁 `result["report"]`**：
+   - `preflight.issues` 非空（涵盖：主角/配景/远山悬空、方形地面边缘穿帮、立柱与吊顶脱节断缝、相机贴墙挡死、**九宫格局部死白过曝**、全局死黑欠曝、或**全图灰蒙发平缺乏动态范围**）：**必须先按提示修好代码并在同一 `output_dir` 重跑预览，严禁带病出正式图**。
    - `missing_images` 或 `missing_subjects` 非空：立即修正贴图路径或物体命名。
-2. **用 `read_file` 同时查看 `preview.png` 与 `overview.png`**：
-   - `overview.png` 会自动聚焦在主相机与核心主体周围，并在室内模式下自动隐藏吊顶透视房间内部。若画面异常，结合 `overview.png` 里的红色相机箭头和 `diagnostics` 定位原因。
-3. **第三方挑剔眼光审图（有一项不达标就重修）**：
-   - **是否退回“平地摆件”**：是不是又变成了一块孤零零的光秃平面加一两个粗糙几何体？地面四角或边缘有没有在背景里穿帮？
-   - **远景与山体是否漏底**：远山或墙体底部有没有悬在半空漏出背后的天空？
-   - **空间层次与光线氛围**：前中后景有没有拉开？封闭室内是不是灰暗发闷、缺少主光方向？
-   - **材质是否像廉价塑料**：写实场景表面有没有真实扫描纹理与凹凸反光变化？贴图有没有明显重复方格？
-4. 自审全部过关后，将 `settings["mode"]` 改为 `"final"`（保持同一 `output_dir`）使用 Cycles 渲染正式大图 `render.png` 并打包保存 `scene.blend`。
+2. **用 `read_file` 同时查看 `preview.png` 与 `overview.png`，执行 6 维挑剔审图**：
+   - `overview.png` 会自动聚焦在主相机与核心主体周围，并自动隐藏室内吊顶以及遮挡视线的峡谷高墙。若画面异常，结合 `overview.png` 里的红色相机箭头和 `diagnostics` 定位原因。
+   - **6 维视觉否决项（有一项不达标就改代码重跑预览）**：
+     1. **局部高光与明暗反差**：前景窗框、玻璃或墙面有没有被近距离高能灯光轰成一片死白？画面是不是灰蒙蒙一片、缺少清晰的主光投射与暗部层次？
+     2. **结构衔接严密性**：立柱顶端有没有严丝合缝顶住天花板？远山与墙体底座有没有深扎入地下（无漏底天空线）？
+     3. **道具曲面与造型完成度**：翻开的书页、缆绳、布帘有没有自然弧度？有没有把复杂器物偷懒画成两块扁平直方板？
+     4. **人体尺度参照感**：巨构峡谷或高耸祭坛旁有没有 `1.05m` 护栏、台阶或门洞提供明确的体量对比？
+     5. **前中后三层空间纵深**：近景遮挡框、中景焦点构筑物、远景闭合结构/光雾是否在剪影和明度上清晰拉开？
+     6. **材质真实微质感**：写实表面有没有真实扫描纹理凹凸与粗糙度明暗变化？贴图有没有明显重复方格？
+
+### 阶段 B：Final 正式渲染后二次审视 + Blender 管线独立秒级后处理（`br.run_post_process`）
+预览自审全部过关后，将 `settings["mode"]` 改为 `"final"`（保持同一 `output_dir`）使用 Cycles 渲染 `render.png`（底层会自动在同目录保存包含 `Image` / `Mist` / `AO` 三通道的 16-bit MultiLayer 缓存 `raw_cache.exr`）。
+
+**Cycles 出图后绝不能直接交差，必须执行二次审图与后处理润色**：
+1. **调用 `read_file` 查看 `render.png`，并查看 `report_render.json["exposure_check"]`**：
+   - 仔细观察 Cycles 成品是否存在：**远景几何边缘过于生硬像塑料模型**、**建筑夹角与底座缺乏接触阴影压暗**、**高光/发光体干瘪缺乏电影级柔光晕染**、**冷暖影调平淡**或**局部明暗需要微调**。
+2. **按需调用 `br.run_post_process(...)` 秒级迭代 Blender 合成器后处理（无需重跑 3D 光追，仅需 ~1 秒）**：
+   - 如果 `render.png` 还可以进一步提升氛围，或者需要针对 `exposure_check["post_process_recommendations"]` 强化画面，直接调用：
+   ```python
+   post_res = br.run_post_process(
+       output_dir=out_dir,
+       post_process={
+           "preset": "sterile_cold_brutalist",  # 可选基础预设，也可直接传下面的模块字典
+           "mist": {"color": (0.78, 0.85, 0.92, 1.0), "strength": 0.30},         # 景深空气透视雾气，柔化远景硬边
+           "ao_boost": {"strength": 0.35},                                       # 强化角落与底座 AO 接触阴影
+           "glare": {"glare_type": "Fog Glow", "threshold": 0.9, "strength": 0.3, "size": 0.5},  # 泛光: Bloom / Fog Glow / Streaks
+           "color_balance": {"lift": (0.96, 0.98, 1.04, 1.0), "gamma": (1.0, 1.0, 1.02, 1.0), "gain": (1.02, 1.01, 0.98, 1.0), "factor": 0.65},
+           "contrast_saturation": {"brightness": 0.0, "contrast": 6.0, "saturation": 0.92},
+           "vignette": {"strength": 0.32, "scale": 0.80, "feather": 0.24},       # 椭球高斯柔化暗角，收拢视觉中心
+           "lens_distortion": {"dispersion": 0.009, "distortion": -0.006},       # 边缘光学色散与微畸变，破除 CG 数码感
+           "sharpen": {"strength": 0.14},                                        # 材质微纹理清晰度锐化
+       },
+       view="AgX",
+       look="AgX - Medium High Contrast",
+       exposure=0.0,
+       overwrite_final=True,  # 自动把原图备份为 render_raw.png，并将调色后成片写入 render.png 与 render_post.png
+   )
+   ```
+3. **用 `read_file` 检查后处理生成的 `render.png`**：确认光晕自然、景深雾气通透、对比度饱满且无过曝死黑后，再展示给用户。
 
 ---
 

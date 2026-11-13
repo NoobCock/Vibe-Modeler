@@ -195,4 +195,275 @@ def make_plank_floor(name="PlankFloor", length=4.0, width=2.0, plank_width=0.18,
         p.parent = root
     return root
 """,
+
+    "build_curved_open_book": """
+def build_curved_open_book(
+    name="CurvedOpenBook",
+    location=(0.0, 0.0, 0.0),
+    rotation=(0.0, 0.0, 0.0),
+    width=1.25,
+    depth=0.86,
+    page_arch=0.14,
+    flutter_count=3,
+    mat_cover=None,
+    mat_page=None,
+    allow_float=False,
+):
+    '''
+    用 BMesh 程序化生成带有自然 S 型拱曲书页、圆弧书脊与翻飞卷曲单页的精装摊开大书
+    （彻底避免把翻开的书做成两块死板直方块的积木感）。返回父级 Empty。
+    '''
+    import bmesh
+    import random
+    rnd = random.Random(hash(name) & 0xFFFFFFFF)
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = location
+    root.rotation_euler = rotation
+    if allow_float:
+        root["vm_allow_float"] = True
+
+    def _assign(obj, mat):
+        if mat:
+            if obj.data.materials:
+                obj.data.materials[0] = mat
+            else:
+                obj.data.materials.append(mat)
+
+    half_w = width * 0.5
+    # 1. 左右微倾硬壳封皮 + 弧形书脊
+    for side in (-1, 1):
+        bpy.ops.mesh.primitive_cube_add(size=1.0)
+        cov = bpy.context.object
+        cov.name = f"{name}_Cover_{'L' if side < 0 else 'R'}"
+        cov.scale = (half_w * 0.98, depth * 1.02, 0.024)
+        cov.location = (side * half_w * 0.49, 0.0, 0.02)
+        cov.rotation_euler = (0.0, -side * math.radians(8.5), 0.0)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        add_bevel(cov, width=0.005, segments=2)
+        _assign(cov, mat_cover)
+        if allow_float:
+            cov["vm_allow_float"] = True
+        cov.parent = root
+
+    bpy.ops.mesh.primitive_cylinder_add(vertices=20, radius=0.055, depth=depth * 1.03,
+                                        location=(0.0, 0.0, 0.0), rotation=(math.radians(90), 0.0, 0.0))
+    spine = bpy.context.object
+    spine.name = f"{name}_Spine"
+    spine.scale = (1.15, 0.55, 1.0)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    _assign(spine, mat_cover)
+    if allow_float:
+        spine["vm_allow_float"] = True
+    spine.parent = root
+
+    # 2. 左右拱曲厚书页块（BMesh 沿 X 采样正弦拱起曲线并挤出厚度）
+    segs_x = 24
+    segs_y = 8
+    for side in (-1, 1):
+        mesh = bpy.data.meshes.new(f"{name}_PageBlock_{'L' if side < 0 else 'R'}")
+        bm = bmesh.new()
+        grid_top = []
+        grid_bot = []
+        for iy in range(segs_y + 1):
+            vy = -depth * 0.47 + (iy / float(segs_y)) * (depth * 0.94)
+            row_t = []
+            row_b = []
+            for ix in range(segs_x + 1):
+                t = ix / float(segs_x)
+                vx = side * (0.015 + t * (half_w * 0.92))
+                # 自然书页拱曲：近书脊深凹爬升，中段饱满拱起，外缘微翘
+                arch_z = math.sin(t * math.pi * 0.88) * page_arch - math.sin(t * math.pi * 1.85) * (page_arch * 0.18)
+                thick = 0.055 * (1.0 - 0.22 * t)
+                base_z = 0.025 + t * 0.035
+                row_t.append(bm.verts.new((vx, vy, base_z + arch_z + thick)))
+                row_b.append(bm.verts.new((vx, vy, base_z + arch_z * 0.35)))
+            grid_top.append(row_t)
+            grid_bot.append(row_b)
+        for iy in range(segs_y):
+            for ix in range(segs_x):
+                v1, v2, v3, v4 = grid_top[iy][ix], grid_top[iy][ix + 1], grid_top[iy + 1][ix + 1], grid_top[iy + 1][ix]
+                bm.faces.new((v1, v2, v3, v4) if side > 0 else (v4, v3, v2, v1))
+                b1, b2, b3, b4 = grid_bot[iy][ix], grid_bot[iy][ix + 1], grid_bot[iy + 1][ix + 1], grid_bot[iy + 1][ix]
+                bm.faces.new((b4, b3, b2, b1) if side > 0 else (b1, b2, b3, b4))
+        # 封边
+        for ix in range(segs_x):
+            bm.faces.new((grid_bot[0][ix], grid_bot[0][ix + 1], grid_top[0][ix + 1], grid_top[0][ix]))
+            bm.faces.new((grid_top[-1][ix], grid_top[-1][ix + 1], grid_bot[-1][ix + 1], grid_bot[-1][ix]))
+        for iy in range(segs_y):
+            bm.faces.new((grid_bot[iy][0], grid_top[iy][0], grid_top[iy + 1][0], grid_bot[iy + 1][0]))
+            bm.faces.new((grid_top[iy][-1], grid_bot[iy][-1], grid_bot[iy + 1][-1], grid_top[iy + 1][-1]))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(mesh)
+        bm.free()
+        for poly in mesh.polygons:
+            poly.use_smooth = True
+        pobj = bpy.data.objects.new(mesh.name, mesh)
+        bpy.context.collection.objects.link(pobj)
+        add_bevel(pobj, width=0.003, segments=2)
+        _assign(pobj, mat_page)
+        if allow_float:
+            pobj["vm_allow_float"] = True
+        pobj.parent = root
+
+    # 3. 正在翻起 / 悬浮卷曲的散页
+    for fi in range(max(0, int(flutter_count))):
+        mesh = bpy.data.meshes.new(f"{name}_FlutterPage_{fi}")
+        bm = bmesh.new()
+        pw = half_w * 0.86
+        pd = depth * 0.88
+        s_u, s_v = 16, 6
+        verts = []
+        curl_dir = -1 if fi % 2 == 0 else 1
+        lift_h = 0.16 + fi * 0.14
+        for iv in range(s_v + 1):
+            vv = (iv / float(s_v) - 0.5) * pd
+            row = []
+            for iu in range(s_u + 1):
+                u = iu / float(s_u)
+                ux = curl_dir * (u * pw)
+                uz = math.sin(u * math.pi) * (page_arch * 1.35) + (u ** 1.7) * 0.11 + math.cos(vv * 3.0 + fi) * 0.018
+                row.append(bm.verts.new((ux, vv, uz)))
+            verts.append(row)
+        for iv in range(s_v):
+            for iu in range(s_u):
+                bm.faces.new((verts[iv][iu], verts[iv][iu + 1], verts[iv + 1][iu + 1], verts[iv + 1][iu]))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(mesh)
+        bm.free()
+        for poly in mesh.polygons:
+            poly.use_smooth = True
+        fobj = bpy.data.objects.new(mesh.name, mesh)
+        bpy.context.collection.objects.link(fobj)
+        fobj.location = (rnd.uniform(-0.08, 0.08), rnd.uniform(-0.06, 0.06), lift_h)
+        fobj.rotation_euler = (rnd.uniform(-0.18, 0.18), curl_dir * rnd.uniform(0.15, 0.42), rnd.uniform(-0.22, 0.22))
+        add_solidify(fobj, thickness=0.004)
+        _assign(fobj, mat_page)
+        fobj["vm_allow_float"] = True
+        fobj.parent = root
+
+    bpy.context.view_layer.update()
+    return root
+""",
+
+    "build_hanging_cables": """
+def build_hanging_cables(
+    name="HangingCables",
+    start_pt=(-4.0, 0.0, 8.0),
+    end_pt=(4.0, 0.0, 8.0),
+    sag=1.4,
+    count=3,
+    spread=0.35,
+    radius=0.025,
+    mat_cable=None,
+    seed=42,
+):
+    '''
+    在两点之间生成多根自然垂坠的悬链线电缆 / 软管束（自动标记 vm_allow_float=True），
+    用于打破巨构峡谷、工业内景或超现实空间的僵硬直线。返回父级 Empty。
+    '''
+    import random
+    from mathutils import Vector
+    rnd = random.Random(seed)
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root["vm_allow_float"] = True
+    p0 = Vector(start_pt)
+    p1 = Vector(end_pt)
+    span_vec = p1 - p0
+    perp = Vector((-span_vec.y, span_vec.x, 0.0))
+    if perp.length > 1e-4:
+        perp.normalize()
+    else:
+        perp = Vector((1.0, 0.0, 0.0))
+
+    for i in range(max(1, int(count))):
+        off_t = (i - (count - 1) * 0.5) * spread if count > 1 else 0.0
+        cur_sag = sag * rnd.uniform(0.82, 1.22)
+        cdata = bpy.data.curves.new(f"{name}_Curve_{i}", type='CURVE')
+        cdata.dimensions = '3D'
+        cdata.bevel_depth = radius * rnd.uniform(0.85, 1.15)
+        cdata.bevel_resolution = 3
+        spline = cdata.splines.new('POLY')
+        steps = 20
+        spline.points.add(steps)
+        for s in range(steps + 1):
+            t = s / float(steps)
+            pt = p0.lerp(p1, t) + perp * off_t
+            pt.z -= 4.0 * cur_sag * t * (1.0 - t)
+            spline.points[s].co = (pt.x, pt.y, pt.z, 1.0)
+        cobj = bpy.data.objects.new(f"{name}_{i}", cdata)
+        bpy.context.collection.objects.link(cobj)
+        cobj["vm_allow_float"] = True
+        if mat_cable:
+            cobj.data.materials.append(mat_cable)
+        cobj.parent = root
+    return root
+""",
+
+    "build_human_scale_railing": """
+def build_human_scale_railing(
+    name="HumanScaleRailing",
+    start_pt=(-4.0, 0.0, 0.0),
+    end_pt=(4.0, 0.0, 0.0),
+    height=1.05,
+    post_spacing=1.5,
+    rail_count=2,
+    mat_rail=None,
+    allow_float=False,
+):
+    '''
+    沿 start_pt 到 end_pt 生成标准人体尺度（默认高 1.05 米）的金属/混凝土护栏（立柱 + 顶扶手 + 横档），
+    专用于给 30~60 米高的巨构峡谷、观测连桥、台阶边缘注入明确的“人体尺度参照物”。返回父级 Empty。
+    '''
+    from mathutils import Vector
+    p0 = Vector(start_pt)
+    p1 = Vector(end_pt)
+    diff = p1 - p0
+    length = diff.length
+    if length < 0.1:
+        return None
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = p0
+    angle_z = math.atan2(diff.y, diff.x)
+    root.rotation_euler = (0.0, 0.0, angle_z)
+    if allow_float:
+        root["vm_allow_float"] = True
+
+    def _assign(obj):
+        if mat_rail:
+            if obj.data.materials:
+                obj.data.materials[0] = mat_rail
+            else:
+                obj.data.materials.append(mat_rail)
+        if allow_float:
+            obj["vm_allow_float"] = True
+        obj.parent = root
+
+    n_posts = max(2, int(round(length / max(0.4, post_spacing))) + 1)
+    for i in range(n_posts):
+        x = (i / float(n_posts - 1)) * length
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x, 0.0, height * 0.5))
+        post = bpy.context.object
+        post.name = f"{name}_Post_{i}"
+        post.scale = (0.04, 0.04, height)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        add_bevel(post, width=0.004, segments=2)
+        _assign(post)
+
+    for r in range(max(1, int(rail_count))):
+        rz = height if r == 0 else height * (1.0 - (r / float(rail_count + 0.5)))
+        thick = 0.048 if r == 0 else 0.024
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(length * 0.5, 0.0, rz))
+        bar = bpy.context.object
+        bar.name = f"{name}_Rail_{r}"
+        bar.scale = (length + 0.04, thick, thick)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        add_bevel(bar, width=0.004, segments=2)
+        _assign(bar)
+
+    bpy.context.view_layer.update()
+    return root
+""",
 }

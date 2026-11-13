@@ -15,7 +15,7 @@ Vibe-Modeler 模块化三维空间骨架生成器
 
 SPATIAL_ARCHETYPE_SNIPPETS = {
     "spatial_box_helper": """
-def _vm_arch_box(name, center, dims, mat=None, bevel_width=0.015, parent=None):
+def _vm_arch_box(name, center, dims, mat=None, bevel_width=0.015, parent=None, allow_float=False):
     '''内部通用结构块：按真实米制尺寸建长方体并应用缩放与倒角。'''
     bpy.ops.mesh.primitive_cube_add(size=1.0, location=center)
     ob = bpy.context.object
@@ -29,6 +29,8 @@ def _vm_arch_box(name, center, dims, mat=None, bevel_width=0.015, parent=None):
             ob.data.materials[0] = mat
         else:
             ob.data.materials.append(mat)
+    if allow_float:
+        ob["vm_allow_float"] = True
     if parent is not None:
         ob.parent = parent
     return ob
@@ -295,7 +297,7 @@ def build_canyon_corridor(
             rx = side * (hx + rib_depth * 0.5)
             _vm_arch_box(f"{name}_Rib_{tag}_{i}", (rx, ry, height * 0.5), (rib_depth, rib_w, height), mat=wmat, parent=root)
         if overhead_beams and i % 2 == 0:
-            _vm_arch_box(f"{name}_SkyBeam_{i}", (0, ry, height - 0.45), (alley_width + rib_depth * 2, rib_w * 0.85, 0.85), mat=wmat, parent=root)
+            _vm_arch_box(f"{name}_SkyBeam_{i}", (0, ry, height - 0.45), (alley_width + rib_depth * 2, rib_w * 0.85, 0.85), mat=wmat, parent=root, allow_float=True)
 
     # 可选：尽头高耸层级塔碑
     if focal_spire_height and focal_spire_height > 0:
