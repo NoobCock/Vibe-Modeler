@@ -65,3 +65,19 @@
    - 需要特殊图案、手绘做旧斑驳墙皮、特定瓷砖花纹、定制划痕粗糙度遮罩时，主动调用 `image-generator` 子智能体生成无缝贴图，传入 `setup_generated_texture_material(...)` 同时驱动凹凸与反光层次。
 3. **第三梯队（程序化着色适用边界）**：
    - 纯程序化节点仅用于：透光折射玻璃、半透薄纱窗帘、赛璐珞双阶色块（建议叠底淡淡的木纹/石纹贴图破除塑料感）、低多边形切面色块、自发光光环，或断网保底。
+
+---
+
+## 四、人体尺度参照、有机曲面造型与电影级合成器后期
+
+1. **巨构场景必须放入“人体尺度参照物” (Human-Scale Anchors)**：
+   - 建造 30~60 米高的粗野主义峡谷、神圣巨碑或挑高光井时，光有大几何块会让观众把 50 米高墙误看成 2 米积木。必须在近中景连桥、平台或基座处调用 `build_human_scale_railing(..., height=1.05)`（或配 `0.18m` 标准踏步台阶、`2.1m` 门洞），用熟悉的人体尺寸瞬间烘托出巨构的压迫感。
+2. **柔性/有机道具拒绝平板方块 (Organic Curvature)**：
+   - 翻开的书本与飞散书页必须调用 `build_curved_open_book(...)` 生成 S 型拱起书页与卷曲单页；峡谷或工业空间高处可拉设 `build_hanging_cables(...)` 悬链线缆绳，打破横平竖直的机械直线。
+3. **风格化合成器后处理预设 (`POST_PROCESS_PRESETS` / `br.run_post_process`)**：
+   - **冷峻粗野/无菌实验室 (`"sterile_cold_brutalist"`)**：冷灰蓝 Mist 景深空气透视 (`strength=0.32`) + 强 AO 接触阴影 (`0.38`) + Fog Glow 柔光 + 冷青暗部/微暖高光分离调色 + 边缘色散与微锐化。
+   - **温暖电影感 (`"cinematic_warm"`)**：暖金黄昏 Mist 薄雾 + 柔和 Bloom + 暖调 Lift/Gamma/Gain + 暗角压边。
+   - **阈限梦核 (`"liminal_dream"`)**：线性微黄雾气 + 低阈值大范围柔光 (`threshold=0.72, size=0.68`) + 镜头暗角与轻度边缘色散 (`dispersion=0.015`)。
+   - **超现实失重星芒 (`"surreal_ethereal_glow"`)**：深海幽蓝景深雾 + 双层 Glare（`Bloom` 柔光 + 6 芒 `Streaks` 星芒）+ 光学微色散。
+   - **高反差明暗对照 (`"high_contrast_chiaroscuro"`)**：强 AO 压暗 (`0.42`) + 高对比度 (`contrast=14`) + 深暗角 (`0.42`)。
+   - **清透二次元 (`"clean_anime"`)**：搭配 `"view": "Standard"`，轻柔 Bloom + 提亮高饱和度 + 极轻暗角。

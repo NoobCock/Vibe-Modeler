@@ -95,6 +95,7 @@ for block in list(bpy.data.materials):
 def _render_footer(settings, out_dir, image_name, blend_name):
     """渲染、检查、打包、保存的收尾代码。"""
     mode = settings.get("mode", "preview")
+    out_dir_s = out_dir.replace("\\", "/")
     cfg = {
         "mode": mode,
         "width": settings.get("width", 1920),
@@ -104,13 +105,14 @@ def _render_footer(settings, out_dir, image_name, blend_name):
         "look": settings.get("look", "AgX - Base Contrast"),
         "exposure": settings.get("exposure", 0.0),
         "bloom": settings.get("bloom"),
+        "post_process": settings.get("post_process"),
+        "raw_cache_dir": out_dir_s if mode == "final" else None,
         "transparent": settings.get("transparent", False),
     }
     subjects = settings.get("subjects", [])
     spatial_mode = settings.get("spatial_mode", "grounded")
     overview = settings.get("overview", mode == "preview")
     pack = settings.get("pack", True)
-    out_dir_s = out_dir.replace("\\", "/")
     return f"""
 # ==========================================
 # 渲染设置、检查、出图、打包、保存
@@ -148,6 +150,9 @@ if {overview!r}:
 scene.render.filepath = os.path.join(_vm_out, "{image_name}")
 bpy.ops.render.render(write_still=True)
 _vm_report["image"] = scene.render.filepath
+_vm_exr_candidate = os.path.join(_vm_out, "raw_cache.exr")
+if os.path.exists(_vm_exr_candidate):
+    _vm_report["raw_cache_exr"] = _vm_exr_candidate
 try:
     _vm_exp = check_render_exposure(scene.render.filepath, spatial_mode=_vm_spatial_mode)
     _vm_report["exposure_check"] = _vm_exp
@@ -304,6 +309,137 @@ from mathutils import Vector, Euler
         f.write(patch_script)
     stdout = run_cli_render(script_path, base_blend_path=base_blend_path, blender_path=blender_path)
     return _collect_result(out_dir, image_name, stdout)
+
+
+def run_post_process(
+    output_dir,
+    post_process,
+    output_name="render_post.png",
+    overwrite_final=True,
+    view="AgX",
+    look="AgX - Medium High Contrast",
+    exposure=0.0,
+    spatial_mode="grounded",
+    blender_path=None,
+):
+    """
+    渲染后独立秒级合成器后处理（无需重新跑 3D 光线追踪！）：
+    自动读取 output_dir 下的 raw_cache.exr（含 16-bit Image / Mist / AO 三通道，若不存在则回退到 render_raw.png / render.png），
+    执行 Blender Compositor 7 大电影级后期模块（雾气混色、AO 压暗、多级泛光星芒、Lift/Gamma/Gain 调色、暗角、色散畸变、微锐化），
+    约 1 秒生成成片并输出亮度与层次质检报告 report_post.json。
+    overwrite_final=True 时，会先把原始 render.png 备份为 render_raw.png，再用调色后的成片更新 render.png。
+    """
+    import shutil
+
+    out_dir = os.path.abspath(output_dir)
+    os.makedirs(out_dir, exist_ok=True)
+
+    # 优先寻找 16-bit MultiLayer EXR 缓存
+    src_path = None
+    exr_exact = os.path.join(out_dir, "raw_cache.exr")
+    if os.path.exists(exr_exact):
+        src_path = exr_exact
+    else:
+        for fname in sorted(os.listdir(out_dir)):
+            if fname.startswith("raw_cache") and fname.lower().endswith(".exr"):
+                src_path = os.path.join(out_dir, fname)
+                break
+
+    render_png = os.path.join(out_dir, "render.png")
+    render_raw_png = os.path.join(out_dir, "render_raw.png")
+    if os.path.exists(render_png) and not os.path.exists(render_raw_png):
+        try:
+            shutil.copy2(render_png, render_raw_png)
+        except Exception:
+            pass
+
+    if src_path is None:
+        if os.path.exists(render_raw_png):
+            src_path = render_raw_png
+        elif os.path.exists(render_png):
+            src_path = render_png
+        else:
+            prev_png = os.path.join(out_dir, "preview.png")
+            if os.path.exists(prev_png):
+                src_path = prev_png
+            else:
+                raise FileNotFoundError(f"在 {out_dir} 中未找到 raw_cache.exr 或 render.png，无法执行后处理")
+
+    out_dir_s = out_dir.replace("\\", "/")
+    src_path_s = src_path.replace("\\", "/")
+    post_script = f"""# -*- coding: utf-8 -*-
+import bpy, os, shutil, json as _vm_json
+import math
+
+{render_pipeline.RENDER_PIPELINE_SNIPPETS["set_eevee_engine"]}
+{render_pipeline.RENDER_PIPELINE_SNIPPETS["setup_color_management"]}
+{render_pipeline.RENDER_PIPELINE_SNIPPETS["setup_compositor_post_process"]}
+{placement.PLACEMENT_SNIPPETS["check_render_exposure"]}
+
+scene = bpy.context.scene
+# 删除默认立方体与灯光，保留相机使合成器直接秒级输出图像节点结果
+for _o in list(bpy.data.objects):
+    if _o.type != 'CAMERA':
+        bpy.data.objects.remove(_o, do_unlink=True)
+
+_src = r"{src_path_s}"
+_w, _h = 0, 0
+for _cand in [os.path.join(r"{out_dir_s}", "render_raw.png"), os.path.join(r"{out_dir_s}", "render.png"), _src]:
+    if os.path.exists(_cand):
+        _cimg = bpy.data.images.load(_cand, check_existing=True)
+        if _cimg.size[0] > 4 and _cimg.size[1] > 4:
+            _w, _h = _cimg.size[0], _cimg.size[1]
+            break
+if _w <= 4 or _h <= 4:
+    _w, _h = 1920, 1080
+scene.render.resolution_x = _w
+scene.render.resolution_y = _h
+scene.render.resolution_percentage = 100
+scene.render.image_settings.file_format = "PNG"
+
+set_eevee_engine(samples=1, use_raytracing=False)
+setup_color_management(view={view!r}, look={look!r}, exposure={float(exposure)!r})
+setup_compositor_post_process(post_process={post_process!r}, source_image_path=_src)
+
+_out_file = os.path.join(r"{out_dir_s}", "{output_name}")
+scene.render.filepath = _out_file
+bpy.ops.render.render(write_still=True)
+
+_final_file = os.path.join(r"{out_dir_s}", "render.png")
+if {bool(overwrite_final)!r} and os.path.abspath(_out_file) != os.path.abspath(_final_file):
+    shutil.copy2(_out_file, _final_file)
+
+_exp = check_render_exposure(_out_file, spatial_mode={spatial_mode!r})
+_rep = {{
+    "mode": "post_process",
+    "source_image": _src,
+    "image": _out_file,
+    "final_image": _final_file if {bool(overwrite_final)!r} else _out_file,
+    "post_process": {post_process!r},
+    "view": {view!r},
+    "look": {look!r},
+    "exposure": {float(exposure)!r},
+    "exposure_check": _exp,
+}}
+with open(os.path.join(r"{out_dir_s}", "report_post.json"), "w", encoding="utf-8") as _f:
+    _vm_json.dump(_rep, _f, ensure_ascii=False, indent=2)
+print(f"[Vibe-Modeler] 后处理管线完成: {{_out_file}}")
+"""
+    script_path = os.path.join(out_dir, "post_process_script.py")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write(post_script)
+    stdout = run_cli_render(script_path, blender_path=blender_path)
+    report_path = os.path.join(out_dir, "report_post.json")
+    report = None
+    if os.path.exists(report_path):
+        with open(report_path, "r", encoding="utf-8") as f:
+            report = json.load(f)
+    return {
+        "output_dir": out_dir,
+        "report_file": report_path,
+        "report": report,
+        "stdout_tail": stdout[-1500:],
+    }
 
 
 # ==========================================
