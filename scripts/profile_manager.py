@@ -191,6 +191,7 @@ DEFAULT_PROFILE = {
 }
 
 CATEGORY_DIMENSIONS = {
+    "tone_mode": ("atmosphere", "modeling", "lighting", "composition"),
     "interaction_mode": ("atmosphere", "modeling", "lighting", "composition"),
     "spatial_archetype": ("atmosphere", "composition"),
     "art_movement": ("atmosphere", "modeling"),
@@ -202,6 +203,7 @@ CATEGORY_DIMENSIONS = {
 }
 
 CATEGORY_LABELS = {
+    "tone_mode": "语气风格",
     "interaction_mode": "沟通模式",
     "spatial_archetype": "空间拓扑",
     "art_movement": "艺术流派",
@@ -296,6 +298,7 @@ def save_profile(profile):
 def _session_options(session_data):
     camera = " + ".join(x for x in (session_data.get("ratio"), session_data.get("camera_lens")) if x)
     return {
+        "tone_mode": session_data.get("tone_mode"),
         "interaction_mode": session_data.get("interaction_mode"),
         "spatial_archetype": session_data.get("spatial_archetype"),
         "art_movement": session_data.get("art_movement"),
@@ -315,6 +318,7 @@ def export_requirements(session_data, output_path=None):
         output_path = os.path.join(out_dir, "session_requirements.json")
     req_data = {
         "export_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "tone_mode": s.get("tone_mode", "较富有激情的"),
         "interaction_mode": s.get("interaction_mode", "detailed"),
         "spatial_topology": {
             "spatial_archetype": s.get("spatial_archetype", ""),
