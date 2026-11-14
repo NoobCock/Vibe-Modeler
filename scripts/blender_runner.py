@@ -111,6 +111,7 @@ def _render_footer(settings, out_dir, image_name, blend_name):
     }
     subjects = settings.get("subjects", [])
     spatial_mode = settings.get("spatial_mode", "grounded")
+    complexity_tier = settings.get("complexity_tier", "tier2_architectural")
     overview = settings.get("overview", mode == "preview")
     pack = settings.get("pack", True)
     return f"""
@@ -120,16 +121,18 @@ def _render_footer(settings, out_dir, image_name, blend_name):
 import json as _vm_json
 _vm_out = r"{out_dir_s}"
 _vm_spatial_mode = {spatial_mode!r}
+_vm_complexity_tier = {complexity_tier!r}
 configure_render(**{cfg!r})
 scene = bpy.context.scene
 
 _vm_subject_names = {list(subjects)!r}
 _vm_subjects = [bpy.data.objects[n] for n in _vm_subject_names if n in bpy.data.objects]
 _vm_missing = [n for n in _vm_subject_names if n not in bpy.data.objects]
-_vm_preflight = preflight_check(_vm_subjects, spatial_mode=_vm_spatial_mode)
+_vm_preflight = preflight_check(_vm_subjects, spatial_mode=_vm_spatial_mode, complexity_tier=_vm_complexity_tier)
 _vm_report = {{
     "mode": "{mode}",
     "spatial_mode": _vm_spatial_mode,
+    "complexity_tier": _vm_complexity_tier,
     "missing_subjects": _vm_missing,
     "preflight": _vm_preflight,
     "diagnostics": scene_diagnostics(),
