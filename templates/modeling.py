@@ -466,4 +466,413 @@ def build_human_scale_railing(
     bpy.context.view_layer.update()
     return root
 """,
+
+    "build_bmesh_fractured_slab": """
+def build_bmesh_fractured_slab(
+    name="FracturedSlab",
+    location=(0.0, 0.0, 0.0),
+    dims=(2.8, 1.8, 0.36),
+    rotation=(0.0, 0.0, 0.0),
+    crack_irregularity=0.24,
+    rebar_count=5,
+    mat_shell=None,
+    mat_core=None,
+    mat_rebar=None,
+    allow_float=False,
+    seed=0,
+):
+    '''
+    用 BMesh 程序化生成带有真实锯齿状断裂截面、粗糙混凝土内芯与外露扭曲钢筋束的崩裂板体/残骸横梁/碎裂台阶。
+    彻底取代“把完整长方体歪转几个角度冒充破碎”的假破碎做法！返回父级 Empty。
+    '''
+    import bmesh
+    import random as _r
+    rnd = _r.Random(seed)
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = location
+    root.rotation_euler = rotation
+    if allow_float:
+        root["vm_allow_float"] = True
+
+    def _assign(ob, mat):
+        if mat:
+            if ob.data.materials:
+                ob.data.materials[0] = mat
+            else:
+                ob.data.materials.append(mat)
+        if allow_float:
+            ob["vm_allow_float"] = True
+        ob.parent = root
+
+    w, d, h = float(dims[0]), float(dims[1]), float(dims[2])
+    core_mat = mat_core or mat_shell
+    reb_mat = mat_rebar or core_mat
+
+    # 生成左、右两半沿不规则锯齿裂缝撕开的 BMesh 块体，并在断口散落小碎石与外露钢筋
+    nx, ny, nz = 10, 6, 4
+    gap = w * 0.06
+    for side in (-1, 1):
+        me = bpy.data.meshes.new(f"{name}_Half_{'L' if side < 0 else 'R'}")
+        bm = bmesh.new()
+        bmesh.ops.create_cube(bm, size=1.0)
+        bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=4, use_grid_fill=True)
+        for v in bm.verts:
+            vx, vy, vz = v.co.x, v.co.y, v.co.z
+            # 靠近内侧断口 (vx * side < 0) 的顶点施加剧烈锯齿凹凸扰动
+            dist_to_fracture = abs(vx - (-0.5 * side))
+            if dist_to_fracture < 0.38:
+                jag = (1.0 - dist_to_fracture / 0.38) * crack_irregularity
+                vx += rnd.uniform(-jag, jag) * 0.85
+                vy += rnd.uniform(-jag, jag) * 0.35
+                vz += rnd.uniform(-jag, jag) * 0.45
+            else:
+                vx += rnd.uniform(-0.015, 0.015)
+                vy += rnd.uniform(-0.015, 0.015)
+            v.co.x = vx * (w * 0.46)
+            v.co.y = vy * d
+            v.co.z = vz * h
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(me)
+        bm.free()
+        ob = bpy.data.objects.new(me.name, me)
+        bpy.context.collection.objects.link(ob)
+        ob.location = (side * (w * 0.25 + gap * 0.5), rnd.uniform(-0.04, 0.04) * d, rnd.uniform(-0.03, 0.03) * h)
+        ob.rotation_euler = (
+            math.radians(rnd.uniform(-4.5, 4.5)),
+            math.radians(side * rnd.uniform(2.5, 9.5)),
+            math.radians(rnd.uniform(-4.0, 4.0)),
+        )
+        add_bevel(ob, width=min(0.012, min(w, d, h) * 0.04), segments=1)
+        _assign(ob, mat_shell)
+
+    # 裂缝断面粗糙混凝土内芯块
+    for ci in range(3):
+        bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=min(d, h) * rnd.uniform(0.32, 0.48))
+        chunk = bpy.context.object
+        chunk.name = f"{name}_FractureCore_{ci}"
+        chunk.scale = (rnd.uniform(0.6, 1.3), rnd.uniform(0.8, 1.5), rnd.uniform(0.6, 1.1))
+        chunk.location = (rnd.uniform(-gap, gap), (ci - 1) * d * 0.26, rnd.uniform(-h * 0.15, h * 0.15))
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        add_noise_displace(chunk, strength=min(d, h) * 0.14, noise_scale=0.35)
+        _assign(chunk, core_mat)
+
+    # 断裂缝隙间扭曲外露的钢筋束
+    for ri in range(max(0, int(rebar_count))):
+        ry = (ri / max(1.0, float(rebar_count - 1)) - 0.5) * d * 0.76 + rnd.uniform(-0.04, 0.04)
+        rz = rnd.uniform(-h * 0.28, h * 0.28)
+        rlen = gap * rnd.uniform(2.2, 4.2)
+        bpy.ops.mesh.primitive_cylinder_add(
+            vertices=10,
+            radius=max(0.010, min(h, d) * 0.032),
+            depth=rlen,
+            location=(rnd.uniform(-gap * 0.3, gap * 0.3), ry, rz),
+            rotation=(math.radians(rnd.uniform(-16, 16)), math.radians(90 + rnd.uniform(-22, 22)), math.radians(rnd.uniform(-18, 18))),
+        )
+        reb = bpy.context.object
+        reb.name = f"{name}_Rebar_{ri}"
+        _assign(reb, reb_mat)
+
+    bpy.context.view_layer.update()
+    return root
+""",
+
+    "build_shattered_shard_vortex": """
+def build_shattered_shard_vortex(
+    name="ShardVortex",
+    count=120,
+    center=(0.0, 12.0, 5.0),
+    radius_range=(1.2, 8.5),
+    height_span=9.0,
+    scale_range=(0.07, 0.52),
+    spiral_turns=1.6,
+    mat_primary=None,
+    mat_accent=None,
+    accent_ratio=0.18,
+    seed=42,
+):
+    '''
+    用 BMesh 程序化生成大、中、小三级尺度的立体多面体尖锐碎晶/残片漩涡场（参考 Act1bg / Wbg8 / sterile_organ_canyon_v2）。
+    每个碎片均为真实封闭凸多面体棱晶或楔形石块，自动标记 vm_allow_float=True。返回父级 Empty。
+    '''
+    import bmesh
+    import random as _r
+    rnd = _r.Random(seed)
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = center
+    root["vm_allow_float"] = True
+
+    # 预先生成 6 种不同拓扑形态的 BMesh 尖锐多面体网格模板以复用并保持极高运行速度
+    archetype_meshes = []
+    for a_i in range(6):
+        me = bpy.data.meshes.new(f"{name}_ProtoMesh_{a_i}")
+        bm = bmesh.new()
+        n_ring = rnd.randint(5, 8)
+        top_v = bm.verts.new((rnd.uniform(-0.12, 0.12), rnd.uniform(-0.12, 0.12), rnd.uniform(0.95, 1.45)))
+        bot_v = bm.verts.new((rnd.uniform(-0.12, 0.12), rnd.uniform(-0.12, 0.12), -rnd.uniform(0.75, 1.25)))
+        ring_verts = []
+        for k in range(n_ring):
+            ang = (k / float(n_ring)) * math.tau + rnd.uniform(-0.22, 0.22)
+            rad = rnd.uniform(0.22, 0.58)
+            vz = rnd.uniform(-0.28, 0.32)
+            ring_verts.append(bm.verts.new((rad * math.cos(ang), rad * math.sin(ang), vz)))
+        for k in range(n_ring):
+            v_cur = ring_verts[k]
+            v_nxt = ring_verts[(k + 1) % n_ring]
+            bm.faces.new((top_v, v_cur, v_nxt))
+            bm.faces.new((bot_v, v_nxt, v_cur))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(me)
+        bm.free()
+        archetype_meshes.append(me)
+
+    r_min, r_max = float(radius_range[0]), float(radius_range[1])
+    s_min, s_max = float(scale_range[0]), float(scale_range[1])
+    total = max(8, int(count))
+
+    for i in range(total):
+        t = i / float(total)
+        # 螺旋上升流线 + 随机径向散射
+        base_ang = t * spiral_turns * math.tau + rnd.uniform(-0.65, 0.65)
+        rad = r_min + (r_max - r_min) * (t ** 0.75) * rnd.uniform(0.65, 1.25)
+        px = rad * math.cos(base_ang)
+        py = rad * math.sin(base_ang)
+        pz = (t - 0.5) * height_span + rnd.uniform(-0.85, 0.85)
+
+        # 三级尺度分布：12% 巨型残块，33% 中型锋利棱片，55% 高频细碎微晶
+        roll = rnd.random()
+        if roll < 0.12:
+            sc = rnd.uniform(s_max * 0.72, s_max * 1.35)
+        elif roll < 0.45:
+            sc = rnd.uniform((s_min + s_max) * 0.35, s_max * 0.72)
+        else:
+            sc = rnd.uniform(s_min, (s_min + s_max) * 0.35)
+
+        proto = archetype_meshes[i % len(archetype_meshes)]
+        ob = bpy.data.objects.new(f"{name}_Shard_{i:03d}", proto.copy())
+        bpy.context.collection.objects.link(ob)
+        ob.parent = root
+        ob["vm_allow_float"] = True
+        ob.location = (px, py, pz)
+        ob.scale = (sc * rnd.uniform(0.55, 1.15), sc * rnd.uniform(0.45, 0.95), sc * rnd.uniform(1.1, 2.2))
+        # 碎片主轴顺着螺旋切线倾斜，形成强烈的气旋动势
+        ob.rotation_euler = (
+            math.radians(rnd.uniform(-35, 35)),
+            math.radians(rnd.uniform(18, 68)),
+            base_ang + math.radians(rnd.uniform(-25, 25)),
+        )
+        chosen_mat = mat_accent if (mat_accent and rnd.random() < accent_ratio) else mat_primary
+        if chosen_mat:
+            ob.data.materials.append(chosen_mat)
+
+    bpy.context.view_layer.update()
+    return root
+""",
+
+    "build_profiled_machined_ring": """
+def build_profiled_machined_ring(
+    name="MachinedRing",
+    major_radius=4.5,
+    radial_width=0.38,
+    axial_height=0.26,
+    location=(0.0, 0.0, 4.0),
+    rotation=(0.0, 0.0, 0.0),
+    segments=128,
+    fin_count=48,
+    mat_body=None,
+    mat_glow=None,
+    mat_fin=None,
+    allow_float=True,
+):
+    '''
+    用 BMesh 12 点阶梯截面旋转放样生成博物馆级精密机械光环（带内外阶梯法兰、内凹发光能量槽与径向散热鳍片阵列）。
+    彻底淘汰简陋的 primitive_torus_add 光秃秃甜甜圈！返回父级 Empty。
+    '''
+    import bmesh
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = location
+    root.rotation_euler = rotation
+    if allow_float:
+        root["vm_allow_float"] = True
+
+    rw = radial_width * 0.5
+    ah = axial_height * 0.5
+    # 12 点工业精密阶梯截面（含内侧发光凹槽槽道）
+    profile = [
+        (-rw, -ah * 0.55),
+        (-rw * 0.75, -ah),
+        (rw * 0.75, -ah),
+        (rw, -ah * 0.60),
+        (rw, ah * 0.60),
+        (rw * 0.75, ah),
+        (-rw * 0.75, ah),
+        (-rw, ah * 0.55),
+        (-rw * 0.62, ah * 0.42),
+        (-rw * 0.62, -ah * 0.42),
+    ]
+    n_p = len(profile)
+    segs = max(32, int(segments))
+
+    me = bpy.data.meshes.new(f"{name}_RingMesh")
+    bm = bmesh.new()
+    rings = []
+    for s in range(segs):
+        ang = (s / float(segs)) * math.tau
+        ca, sa = math.cos(ang), math.sin(ang)
+        row = []
+        for dr, dz in profile:
+            r = max(0.05, major_radius + dr)
+            row.append(bm.verts.new((r * ca, r * sa, dz)))
+        rings.append(row)
+
+    for s in range(segs):
+        r0 = rings[s]
+        r1 = rings[(s + 1) % segs]
+        for p in range(n_p):
+            p_nxt = (p + 1) % n_p
+            f = bm.faces.new((r0[p], r1[p], r1[p_nxt], r0[p_nxt]))
+            # 内凹槽面（p == 8）赋予发光材质槽号 1
+            if p == 8 and mat_glow is not None:
+                f.material_index = 1
+            else:
+                f.material_index = 0
+
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(me)
+    bm.free()
+    for poly in me.polygons:
+        poly.use_smooth = True
+
+    ring_ob = bpy.data.objects.new(f"{name}_Body", me)
+    bpy.context.collection.objects.link(ring_ob)
+    ring_ob.parent = root
+    if allow_float:
+        ring_ob["vm_allow_float"] = True
+    if mat_body:
+        ring_ob.data.materials.append(mat_body)
+    if mat_glow:
+        if not ring_ob.data.materials:
+            ring_ob.data.materials.append(mat_body or mat_glow)
+        ring_ob.data.materials.append(mat_glow)
+
+    # 径向精密散热鳍片 / 卡扣阵列
+    if fin_count and int(fin_count) > 0:
+        fmat = mat_fin or mat_body
+        n_f = int(fin_count)
+        for fi in range(n_f):
+            ang = (fi / float(n_f)) * math.tau
+            is_major = (fi % 6 == 0)
+            fh = axial_height * (1.42 if is_major else 1.15)
+            fw = radial_width * (1.28 if is_major else 1.08)
+            ft = (2.0 * math.pi * major_radius / n_f) * (0.28 if is_major else 0.16)
+            bpy.ops.mesh.primitive_cube_add(
+                size=1.0,
+                location=(major_radius * math.cos(ang), major_radius * math.sin(ang), 0.0),
+                rotation=(0.0, 0.0, ang),
+            )
+            fin = bpy.context.object
+            fin.name = f"{name}_Fin_{fi:03d}"
+            fin.scale = (fw, max(0.012, ft), fh)
+            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+            add_bevel(fin, width=min(0.006, ft * 0.25), segments=1)
+            fin.parent = root
+            if allow_float:
+                fin["vm_allow_float"] = True
+            if fmat:
+                fin.data.materials.append(fmat)
+
+    bpy.context.view_layer.update()
+    return root
+""",
+
+    "build_hex_wafer_array": """
+def build_hex_wafer_array(
+    name="HexWaferArray",
+    count=90,
+    center=(0.0, 10.0, 4.0),
+    spread=(6.5, 6.5, 5.0),
+    radius_range=(0.09, 0.38),
+    clear_radius=2.2,
+    mat_wafer=None,
+    mat_prism=None,
+    prism_ratio=0.30,
+    seed=7,
+):
+    '''
+    生成三维倒角六边形硅晶圆与 14 面体折射棱晶矩阵（自动在中央留出 clear_radius 视线通廊，绝不挡主角）。
+    专用于抽象意识空间、量子核心、神圣几何或高精度科幻内景，提供丰富的前中后景微尺度参照，无需生硬塞入工厂铁栏杆。
+    '''
+    import bmesh
+    import random as _r
+    rnd = _r.Random(seed)
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = center
+    root["vm_allow_float"] = True
+
+    # 构建倒角六边形晶圆原型网格与双锥六角棱晶原型网格
+    def _make_hex_proto(mesh_name, thick_ratio, tip_ext):
+        me = bpy.data.meshes.new(mesh_name)
+        bm = bmesh.new()
+        r_outer = 1.0
+        r_inner = 0.86
+        hz = thick_ratio * 0.5
+        top_ring, mid_top, mid_bot, bot_ring = [], [], [], []
+        for k in range(6):
+            a = k * math.pi / 3.0
+            ca, sa = math.cos(a), math.sin(a)
+            top_ring.append(bm.verts.new((r_inner * ca, r_inner * sa, hz + tip_ext)))
+            mid_top.append(bm.verts.new((r_outer * ca, r_outer * sa, hz * 0.55)))
+            mid_bot.append(bm.verts.new((r_outer * ca, r_outer * sa, -hz * 0.55)))
+            bot_ring.append(bm.verts.new((r_inner * ca, r_inner * sa, -(hz + tip_ext))))
+        bm.faces.new(top_ring)
+        bm.faces.new(list(reversed(bot_ring)))
+        for k in range(6):
+            kn = (k + 1) % 6
+            bm.faces.new((top_ring[k], mid_top[k], mid_top[kn], top_ring[kn]))
+            bm.faces.new((mid_top[k], mid_bot[k], mid_bot[kn], mid_top[kn]))
+            bm.faces.new((mid_bot[k], bot_ring[k], bot_ring[kn], mid_bot[kn]))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(me)
+        bm.free()
+        return me
+
+    wafer_proto = _make_hex_proto(f"{name}_WaferProto", 0.16, 0.03)
+    prism_proto = _make_hex_proto(f"{name}_PrismProto", 0.42, 0.24)
+
+    placed = 0
+    attempts = 0
+    r_min, r_max = float(radius_range[0]), float(radius_range[1])
+    while placed < int(count) and attempts < int(count) * 4:
+        attempts += 1
+        px = rnd.uniform(-spread[0], spread[0])
+        py = rnd.uniform(-spread[1], spread[1])
+        pz = rnd.uniform(-spread[2] * 0.5, spread[2] * 0.5)
+        # 保持中央视线通廊不被遮挡
+        if math.hypot(px, pz) < clear_radius and abs(py) < spread[1] * 0.65:
+            continue
+        is_prism = (mat_prism is not None and rnd.random() < prism_ratio)
+        proto = prism_proto if is_prism else wafer_proto
+        sc = rnd.uniform(r_min, r_max)
+        ob = bpy.data.objects.new(f"{name}_Unit_{placed:03d}", proto.copy())
+        bpy.context.collection.objects.link(ob)
+        ob.parent = root
+        ob["vm_allow_float"] = True
+        ob.location = (px, py, pz)
+        ob.scale = (sc, sc, sc)
+        ob.rotation_euler = (
+            rnd.uniform(-0.85, 0.85),
+            rnd.uniform(-0.85, 0.85),
+            rnd.uniform(0.0, math.tau),
+        )
+        mat = mat_prism if is_prism else mat_wafer
+        if mat:
+            ob.data.materials.append(mat)
+        placed += 1
+
+    bpy.context.view_layer.update()
+    return root
+""",
 }

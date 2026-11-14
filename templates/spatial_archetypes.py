@@ -265,18 +265,23 @@ def build_canyon_corridor(
     rib_depth=0.9,
     overhead_beams=True,
     focal_spire_height=0.0,
+    catwalk_levels=0,
+    add_railings=True,
     ground_mat=None,
     wall_mat=None,
+    rail_mat=None,
 ):
     '''
     构建两侧夹峙的粗野主义巨构长廊 / 建筑峡谷（相机沿 Y 负轴向 +Y 仰拍或平拍）。
     overhead_beams: True 时在上方架设重复横梁产生强烈透视光影韵律。
     focal_spire_height: >0 时在走廊尽头 (+Y) 竖立高耸多级尖塔/纪念碑，形成神圣巨构视觉中心。
+    catwalk_levels: >0 时在两侧峡谷高墙内壁生成多层挑空步道与 1.05m 标准人体尺度护栏（立刻赋予巨构真实崇高感）。
     '''
     root = bpy.data.objects.new(name, None)
     bpy.context.collection.objects.link(root)
     hx = alley_width * 0.5
     wmat = wall_mat or ground_mat
+    rmat = rail_mat or wmat
 
     # 纵向街道地面（两侧被高墙完全夹住，绝不露边缘）
     _vm_arch_box(f"{name}_Floor", (0, length * 0.35, -0.2), (alley_width + rib_depth * 6, length * 1.35, 0.4), mat=ground_mat, parent=root)
@@ -298,6 +303,29 @@ def build_canyon_corridor(
             _vm_arch_box(f"{name}_Rib_{tag}_{i}", (rx, ry, height * 0.5), (rib_depth, rib_w, height), mat=wmat, parent=root)
         if overhead_beams and i % 2 == 0:
             _vm_arch_box(f"{name}_SkyBeam_{i}", (0, ry, height - 0.45), (alley_width + rib_depth * 2, rib_w * 0.85, 0.85), mat=wmat, parent=root, allow_float=True)
+
+    # 可选：两侧高墙多层挑空栈桥与 1.05m 标准人体尺度护栏
+    if catwalk_levels and int(catwalk_levels) > 0:
+        n_lv = int(catwalk_levels)
+        cw_w = min(1.35, alley_width * 0.16)
+        for lv in range(1, n_lv + 1):
+            cz = (height * 0.78) * (lv / float(n_lv))
+            for side, tag in ((-1.0, "L"), (1.0, "R")):
+                cx = side * (hx - cw_w * 0.45)
+                inner_x = side * (hx - cw_w * 0.92)
+                _vm_arch_box(f"{name}_Catwalk_{tag}_L{lv}", (cx, length * 0.35, cz - 0.11),
+                             (cw_w, length * 1.12, 0.22), mat=wmat, parent=root, allow_float=True)
+                if add_railings:
+                    rh = 1.05
+                    _vm_arch_box(f"{name}_CW_TopRail_{tag}_L{lv}", (inner_x, length * 0.35, cz + rh),
+                                 (0.045, length * 1.12, 0.045), mat=rmat, bevel_width=0.005, parent=root, allow_float=True)
+                    _vm_arch_box(f"{name}_CW_MidRail_{tag}_L{lv}", (inner_x, length * 0.35, cz + rh * 0.52),
+                                 (0.030, length * 1.12, 0.030), mat=rmat, bevel_width=0.004, parent=root, allow_float=True)
+                    n_posts = max(6, int(length / 2.2))
+                    for p_i in range(n_posts + 1):
+                        py = y_start + (length * 1.08) * (p_i / float(n_posts))
+                        _vm_arch_box(f"{name}_CW_Post_{tag}_L{lv}_{p_i}", (inner_x, py, cz + rh * 0.5),
+                                     (0.038, 0.038, rh), mat=rmat, bevel_width=0.004, parent=root, allow_float=True)
 
     # 可选：尽头高耸层级塔碑
     if focal_spire_height and focal_spire_height > 0:
@@ -817,5 +845,514 @@ def create_volumetric_light_beam(
     lobj.rotation_euler = (tgt - src).to_track_quat('-Z', 'Y').to_euler()
     bpy.context.view_layer.update()
     return {"volume_box": fog_box, "spot_light": lobj}
+""",
+
+    "scifi_in_reality_and_megastructures": """
+def build_megastructure_horizon(
+    name="DistantMegastructure",
+    distance_y=155.0,
+    span_x=175.0,
+    base_height=88.0,
+    tower_count=3,
+    style="brutalist_fortress",
+    add_greebles=True,
+    add_window_lights=True,
+    mat_hull=None,
+    mat_rib=None,
+    mat_glow=None,
+    seed=10,
+):
+    '''
+    构建“真实下的科幻”（参考 imageref3 bg013 / images.jpg / 20211026）远景百米级巨型科幻构筑物群。
+    位于 Y = 120m ~ 300m 远方天际线，底座深扎地下 Z = -8.0m 绝不悬空漏底（hovering_ovoid_ship 除外，自动标记 vm_allow_float）。
+    style 可选:
+      - "brutalist_fortress": 阶梯内倾巨型装甲要塞 + 悬挑飞扶壁肋梁 + 表面高频工业 Greeble 凸起与舷窗微光
+      - "orbital_spire": 拔地而起的轨道电梯巨塔 + 多层环形停泊船坞平台 + 顶部高耸天线阵列
+      - "hovering_ovoid_ship": 静默悬浮于湖面/山谷上空的哑光白/深灰巨型椭圆母舰（带机械进气槽缝与底舱微光）
+    '''
+    import bmesh
+    import math as _m, random as _r
+    rnd = _r.Random(seed)
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    hmat = mat_hull
+    rmat = mat_rib or mat_hull
+    gmat = mat_glow
+    if gmat is None and add_window_lights:
+        gmat = bpy.data.materials.new(f"{name}_BeaconGlow")
+        gmat.use_nodes = True
+        bsdf = gmat.node_tree.nodes.get("Principled BSDF")
+        if bsdf:
+            bsdf.inputs["Base Color"].default_value = (0.55, 0.92, 1.0, 1.0)
+            if "Emission Color" in bsdf.inputs:
+                bsdf.inputs["Emission Color"].default_value = (0.45, 0.88, 1.0, 1.0)
+                bsdf.inputs["Emission Strength"].default_value = 5.5
+
+    st = str(style or "brutalist_fortress").lower().strip()
+    if st == "hovering_ovoid_ship":
+        root["vm_allow_float"] = True
+        for i in range(max(1, int(tower_count))):
+            ux = (i / max(1.0, float(tower_count - 1)) - 0.5) if tower_count > 1 else 0.0
+            cx = ux * span_x * 0.55 + rnd.uniform(-6.0, 6.0)
+            cy = distance_y + abs(ux) * 28.0 + rnd.uniform(-8.0, 8.0)
+            cz = base_height * (0.48 if i == 0 else rnd.uniform(0.35, 0.62))
+            rad = base_height * (0.34 if i == 0 else rnd.uniform(0.18, 0.26))
+            bpy.ops.mesh.primitive_uv_sphere_add(segments=64, ring_count=32, radius=rad, location=(cx, cy, cz))
+            hull = bpy.context.object
+            hull.name = f"{name}_OvoidHull_{i}"
+            hull.scale = (0.76, 0.68, 1.38)
+            hull.rotation_euler = (_m.radians(rnd.uniform(-6, 6)), _m.radians(rnd.uniform(-8, 8)), _m.radians(rnd.uniform(-25, 25)))
+            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+            for p in hull.data.polygons:
+                p.use_smooth = True
+            hull.parent = root
+            hull["vm_allow_float"] = True
+            if hmat:
+                hull.data.materials.append(hmat)
+            # 腰部内凹机械进气环槽与悬挂稳定翼
+            for band_z in (-rad * 0.25, rad * 0.18):
+                ring = _vm_arch_box(f"{name}_IntakeSlot_{i}_{band_z:.1f}", (cx, cy - rad * 0.52, cz + band_z),
+                                    (rad * 0.88, rad * 0.24, rad * 0.08), mat=rmat, bevel_width=0.04, parent=root, allow_float=True)
+                if gmat:
+                    _vm_arch_box(f"{name}_SlotGlow_{i}_{band_z:.1f}", (cx, cy - rad * 0.62, cz + band_z),
+                                 (rad * 0.72, 0.12, rad * 0.025), mat=gmat, bevel_width=0.01, parent=root, allow_float=True)
+        bpy.context.view_layer.update()
+        return root
+
+    # brutalist_fortress 或 orbital_spire：底座一律深扎 Z = -8.0m
+    sink_z = -8.0
+    n_t = max(1, int(tower_count))
+    for i in range(n_t):
+        ux = (i / float(n_t - 1) - 0.5) if n_t > 1 else 0.0
+        is_hero = (i == n_t // 2)
+        tx = ux * span_x * 0.68 + (0.0 if is_hero else rnd.uniform(-9.0, 9.0))
+        ty = distance_y + (0.0 if is_hero else abs(ux) * 32.0 + rnd.uniform(-6.0, 12.0))
+        th = base_height * (1.08 if is_hero else rnd.uniform(0.68, 0.88))
+        tw = th * (0.22 if st == "orbital_spire" else 0.42)
+        td = tw * 0.82
+
+        # 1. 一级阶梯/内倾主装甲体（tiers=4）
+        tiers = 5 if st == "orbital_spire" else 4
+        for t_i in range(tiers):
+            f0 = t_i / float(tiers)
+            f1 = (t_i + 1) / float(tiers)
+            z0 = sink_z if t_i == 0 else th * f0
+            z1 = th * f1
+            seg_h = z1 - z0
+            taper = (1.0 - f0 * (0.64 if st == "orbital_spire" else 0.46))
+            sw = tw * taper
+            sd = td * taper
+            _vm_arch_box(
+                f"{name}_Hull_{i}_T{t_i}",
+                (tx, ty, (z0 + z1) * 0.5),
+                (sw, sd, seg_h),
+                mat=hmat,
+                bevel_width=0.12,
+                parent=root,
+            )
+            # 2. 二级悬挑肋梁 / 巨型反应堆护翼 / 环形停泊船坞
+            for side in (-1.0, 1.0):
+                rib_x = tx + side * (sw * 0.52)
+                _vm_arch_box(
+                    f"{name}_Buttress_{i}_T{t_i}_{'L' if side < 0 else 'R'}",
+                    (rib_x, ty - sd * 0.12, (z0 + z1) * 0.5),
+                    (sw * 0.16, sd * 1.14, seg_h * 0.92),
+                    mat=rmat,
+                    bevel_width=0.08,
+                    parent=root,
+                )
+            if t_i in (1, 2, 3):
+                _vm_arch_box(
+                    f"{name}_CantileverDeck_{i}_T{t_i}",
+                    (tx + rnd.uniform(-0.12, 0.12) * sw, ty - sd * 0.48, z1 - seg_h * 0.18),
+                    (sw * 1.38, sd * 0.45, max(1.4, seg_h * 0.14)),
+                    mat=rmat,
+                    bevel_width=0.06,
+                    parent=root,
+                    allow_float=True,
+                )
+
+            # 3. 三级高频工业 Greebles（表面装甲凸块、竖向散热槽、微光舷窗点阵）
+            if add_greebles:
+                n_g = 10 if is_hero else 6
+                for g_i in range(n_g):
+                    gx = tx + rnd.uniform(-0.42, 0.42) * sw
+                    gz = max(2.0, z0 + rnd.uniform(0.12, 0.88) * seg_h)
+                    gw = rnd.uniform(0.08, 0.22) * sw
+                    gh = rnd.uniform(0.10, 0.28) * seg_h
+                    gd = rnd.uniform(0.6, 2.2)
+                    _vm_arch_box(
+                        f"{name}_Greeble_{i}_{t_i}_{g_i}",
+                        (gx, ty - sd * 0.5 - gd * 0.35, gz),
+                        (gw, gd, gh),
+                        mat=rmat if g_i % 2 == 0 else hmat,
+                        bevel_width=0.03,
+                        parent=root,
+                        allow_float=True,
+                    )
+            if add_window_lights and gmat is not None and t_i >= 1:
+                for w_i in range(3):
+                    wx = tx + (w_i - 1) * (sw * 0.28)
+                    wz = z0 + seg_h * (0.32 + 0.22 * w_i)
+                    _vm_arch_box(
+                        f"{name}_BeaconStrip_{i}_{t_i}_{w_i}",
+                        (wx, ty - sd * 0.52, wz),
+                        (sw * 0.18, 0.25, max(0.35, seg_h * 0.035)),
+                        mat=gmat,
+                        bevel_width=0.01,
+                        parent=root,
+                        allow_float=True,
+                    )
+
+        # 顶部高耸通信天线塔阵列
+        for a_i in range(3):
+            ax = tx + (a_i - 1) * (tw * 0.14)
+            ah = th * rnd.uniform(0.16, 0.28)
+            _vm_arch_box(
+                f"{name}_AntennaSpire_{i}_{a_i}",
+                (ax, ty, th + ah * 0.45),
+                (max(0.28, tw * 0.025), max(0.28, tw * 0.025), ah),
+                mat=rmat,
+                bevel_width=0.02,
+                parent=root,
+                allow_float=True,
+            )
+
+    bpy.context.view_layer.update()
+    return root
+
+def build_holographic_data_matrix(
+    name="HolographicMatrix",
+    center=(0.0, 11.0, 3.8),
+    span=(9.5, 12.0, 5.5),
+    panel_count=26,
+    add_sky_wireframe_dome=False,
+    dome_radius=68.0,
+    glow_color=(0.08, 0.88, 1.0),
+    emission_strength=4.2,
+    seed=21,
+):
+    '''
+    构建“真实下的科幻”全息数据矩阵与天体线框罩（参考 imageref3 bg014a / Wbg6 / Act1bg）。
+    自动创建程序化镂空电路/刻度纹理的半透明青蓝/琥珀全息 HUD 屏幕阵列（绝非死板实心色块），
+    可选开启 add_sky_wireframe_dome 在天穹生成巨型六边形/经纬线天体星盘线框网格罩。
+    '''
+    import math as _m, random as _r
+    rnd = _r.Random(seed)
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = center
+    root["vm_allow_float"] = True
+
+    # 创建程序化全息网格/电路半透明材质（用 Brick + Checker 混合驱动 Alpha 与自发光）
+    holo_mat = bpy.data.materials.new(f"{name}_HoloCircuitMat")
+    holo_mat.use_nodes = True
+    if hasattr(holo_mat, "surface_render_method"):
+        holo_mat.surface_render_method = 'BLENDED'
+    elif hasattr(holo_mat, "blend_method"):
+        holo_mat.blend_method = 'BLEND'
+    nt = holo_mat.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    mix_sh = nt.nodes.new("ShaderNodeMixShader")
+    trans = nt.nodes.new("ShaderNodeBsdfTransparent")
+    emit = nt.nodes.new("ShaderNodeEmission")
+    emit.inputs["Color"].default_value = (glow_color[0], glow_color[1], glow_color[2], 1.0)
+    emit.inputs["Strength"].default_value = emission_strength
+
+    coord = nt.nodes.new("ShaderNodeTexCoord")
+    brick = nt.nodes.new("ShaderNodeTexBrick")
+    brick.inputs["Scale"].default_value = 18.0
+    brick.inputs["Mortar Size"].default_value = 0.035
+    brick.inputs["Color1"].default_value = (0.08, 0.08, 0.08, 1.0)
+    brick.inputs["Color2"].default_value = (0.32, 0.32, 0.32, 1.0)
+    brick.inputs["Mortar"].default_value = (1.0, 1.0, 1.0, 1.0)
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.color_ramp.elements[0].position = 0.05
+    ramp.color_ramp.elements[0].color = (0.04, 0.04, 0.04, 1.0)
+    ramp.color_ramp.elements[1].position = 0.75
+    ramp.color_ramp.elements[1].color = (0.68, 0.68, 0.68, 1.0)
+
+    nt.links.new(coord.outputs["Generated"], brick.inputs["Vector"])
+    nt.links.new(brick.outputs["Color"], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], mix_sh.inputs["Fac"])
+    nt.links.new(trans.outputs["BSDF"], mix_sh.inputs[1])
+    nt.links.new(emit.outputs["Emission"], mix_sh.inputs[2])
+    nt.links.new(mix_sh.outputs["Shader"], out.inputs["Surface"])
+
+    # 在两侧与高空分层排布全息数据面板（留出中央主视觉通廊）
+    for i in range(int(panel_count)):
+        side = -1.0 if i % 2 == 0 else 1.0
+        px = side * rnd.uniform(span[0] * 0.22, span[0] * 0.55)
+        py = rnd.uniform(-span[1] * 0.45, span[1] * 0.55)
+        pz = rnd.uniform(-span[2] * 0.35, span[2] * 0.55)
+        pw = rnd.uniform(0.85, 2.45)
+        ph = pw * rnd.uniform(0.45, 0.78)
+        bpy.ops.mesh.primitive_plane_add(size=1.0, location=(px, py, pz))
+        pan = bpy.context.object
+        pan.name = f"{name}_HUDPanel_{i:02d}"
+        pan.scale = (pw, ph, 1.0)
+        pan.rotation_euler = (_m.radians(90.0 + rnd.uniform(-12, 12)), 0.0, _m.radians(-side * rnd.uniform(12, 38)))
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        add_solidify(pan, thickness=0.006)
+        pan.parent = root
+        pan["vm_allow_float"] = True
+        if hasattr(pan, "visible_shadow"):
+            pan.visible_shadow = False
+        pan.data.materials.append(holo_mat)
+
+    if add_sky_wireframe_dome:
+        bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=3, radius=dome_radius, location=(0.0, 0.0, 0.0))
+        dome = bpy.context.object
+        dome.name = f"{name}_CelestialWireDome"
+        dome.parent = root
+        dome["vm_allow_float"] = True
+        if hasattr(dome, "visible_shadow"):
+            dome.visible_shadow = False
+        wmod = dome.modifiers.new("Wireframe", 'WIREFRAME')
+        wmod.thickness = max(0.06, dome_radius * 0.0022)
+        wmod.use_even_offset = True
+        dome.data.materials.append(holo_mat)
+
+    bpy.context.view_layer.update()
+    return root
+
+def build_inverted_sky_megacity(
+    name="InvertedSkyCity",
+    ceiling_z=52.0,
+    y_range=(18.0, 145.0),
+    span_x=115.0,
+    block_count=72,
+    add_bridge_spire=True,
+    add_inverted_pyramid=False,
+    mat_building=None,
+    mat_window_glow=None,
+    seed=33,
+):
+    '''
+    构建天穹倒悬大都会 / 倒置金字塔奇观（参考 imageref3 5aee37 / BG_epilogue / v2-ad53）。
+    在 Z = ceiling_z 的高空倒挂密集的高低错落建筑群与跨天引桥，可选中央贯通天地巨塔或倒置黑曜石金字塔。
+    '''
+    import math as _m, random as _r
+    rnd = _r.Random(seed)
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root["vm_allow_float"] = True
+
+    # 顶层天穹倒挂基座板
+    y_mid = (y_range[0] + y_range[1]) * 0.5
+    y_len = y_range[1] - y_range[0]
+    _vm_arch_box(
+        f"{name}_SkyCrustSlab",
+        (0.0, y_mid, ceiling_z + 2.0),
+        (span_x * 1.15, y_len * 1.12, 4.0),
+        mat=mat_building,
+        bevel_width=0.1,
+        parent=root,
+        allow_float=True,
+    )
+
+    for i in range(int(block_count)):
+        bx = rnd.uniform(-span_x * 0.48, span_x * 0.48)
+        by = rnd.uniform(y_range[0], y_range[1])
+        # 中央留出视觉走廊给连接巨塔或天际线光带
+        if abs(bx) < 6.5 and not add_bridge_spire:
+            bx += 8.5 if bx >= 0 else -8.5
+        bw = rnd.uniform(2.4, 7.5)
+        bd = rnd.uniform(2.4, 7.5)
+        bh = rnd.uniform(6.0, ceiling_z * 0.46)
+        bz = ceiling_z - bh * 0.5
+        _vm_arch_box(
+            f"{name}_InvBlock_{i:03d}",
+            (bx, by, bz),
+            (bw, bd, bh),
+            mat=mat_building,
+            bevel_width=0.05,
+            parent=root,
+            allow_float=True,
+        )
+        if mat_window_glow and i % 3 == 0:
+            _vm_arch_box(
+                f"{name}_InvWinBand_{i:03d}",
+                (bx, by - bd * 0.51, ceiling_z - bh * 0.72),
+                (bw * 0.78, 0.08, 0.35),
+                mat=mat_window_glow,
+                bevel_width=0.01,
+                parent=root,
+                allow_float=True,
+            )
+
+    if add_bridge_spire:
+        sy = y_range[0] + y_len * 0.55
+        for t_i in range(3):
+            tw = 6.2 - t_i * 1.4
+            _vm_arch_box(
+                f"{name}_BridgeTowerTier_{t_i}",
+                (0.0, sy, ceiling_z * 0.5),
+                (tw, tw, ceiling_z + 6.0),
+                mat=mat_building,
+                bevel_width=0.08,
+                parent=root,
+            )
+
+    if add_inverted_pyramid:
+        py_y = y_range[0] + y_len * 0.42
+        py_h = ceiling_z * 0.48
+        bpy.ops.mesh.primitive_cone_add(
+            vertices=4,
+            radius1=py_h * 0.75,
+            radius2=0.08,
+            depth=py_h,
+            location=(0.0, py_y, ceiling_z - py_h * 0.5),
+            rotation=(_m.pi, 0.0, _m.radians(45.0)),
+        )
+        pyr = bpy.context.object
+        pyr.name = f"{name}_InvertedMonolithPyramid"
+        pyr.parent = root
+        pyr["vm_allow_float"] = True
+        if mat_building:
+            pyr.data.materials.append(mat_building)
+
+    bpy.context.view_layer.update()
+    return root
+
+def build_procedural_cloud_deck(
+    name="ProceduralCloudDeck",
+    z_height=-2.2,
+    span_xy=180.0,
+    layers=3,
+    thickness=3.2,
+    cloud_color=(0.94, 0.96, 1.0),
+    shadow_tint=(0.45, 0.54, 0.72),
+    seed=5,
+):
+    '''
+    构建高拟真多层波浪起伏程序化云海（采用高频网格细分 + 双层噪波置换 + 次表面/透射柔光材质）。
+    严禁弱模型使用拍扁的 primitive_uv_sphere_add 堆叠“煎饼/大便状”假云团！
+    '''
+    import random as _r
+    rnd = _r.Random(seed)
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root["vm_allow_float"] = True
+
+    cmat = bpy.data.materials.new(f"{name}_CloudSeaMat")
+    cmat.use_nodes = True
+    nt = cmat.node_tree
+    bsdf = nt.nodes.get("Principled BSDF")
+    if bsdf:
+        bsdf.inputs["Base Color"].default_value = (cloud_color[0], cloud_color[1], cloud_color[2], 1.0)
+        bsdf.inputs["Roughness"].default_value = 0.88
+        if "Subsurface Weight" in bsdf.inputs:
+            bsdf.inputs["Subsurface Weight"].default_value = 0.65
+        if "Subsurface Radius" in bsdf.inputs:
+            bsdf.inputs["Subsurface Radius"].default_value = (shadow_tint[0], shadow_tint[1], shadow_tint[2])
+        noise = nt.nodes.new("ShaderNodeTexNoise")
+        noise.inputs["Scale"].default_value = 8.5
+        noise.inputs["Detail"].default_value = 6.0
+        bump = nt.nodes.new("ShaderNodeBump")
+        bump.inputs["Strength"].default_value = 0.35
+        nt.links.new(noise.outputs["Fac"], bump.inputs["Height"])
+        nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+
+    for lv in range(max(1, int(layers))):
+        lz = z_height - lv * (thickness * 0.75)
+        rad = span_xy * (0.55 + 0.18 * lv)
+        bpy.ops.mesh.primitive_grid_add(x_subdivisions=96, y_subdivisions=96, size=rad * 2.0, location=(0.0, rad * 0.25, lz))
+        sheet = bpy.context.object
+        sheet.name = f"{name}_Layer_{lv}"
+        sheet.parent = root
+        sheet["vm_allow_float"] = True
+        for p in sheet.data.polygons:
+            p.use_smooth = True
+        add_solidify(sheet, thickness=thickness * (0.85 + 0.2 * lv))
+        add_noise_displace(sheet, strength=thickness * (1.35 + 0.25 * lv), noise_scale=0.14 + 0.04 * lv, texture_type='CLOUDS')
+        sheet.data.materials.append(cmat)
+
+    bpy.context.view_layer.update()
+    return root
+
+def setup_aerial_perspective_world(
+    sky_zenith=(0.05, 0.11, 0.22),
+    sky_horizon=(0.42, 0.56, 0.72),
+    cloud_bright=(0.82, 0.88, 0.96),
+    cloud_contrast=0.65,
+    add_planetary_arc=False,
+    mist_start=16.0,
+    mist_depth=175.0,
+    ambient_strength=0.45,
+):
+    '''
+    构建宏大场景与“真实下的科幻”专用双路径（Light Path）大气透视天空与体积云穹着色器：
+    1. 相机直接看到的背景呈现高反差层积风暴云海与可选行星级弯曲弧面地平线（参考 imageref3 32a3 / sterile_organ_canyon_v2），彻底杜绝画面顶部死黑虚空；
+    2. 场景漫反射照明走柔和环境光路径，不过曝不抢主光；
+    3. 自动配置 Blender Mist 雾气通道起点与深度，配合远景巨构立即产生百米级空气透视（Aerial Perspective）纵深感。
+    '''
+    scene = bpy.context.scene
+    if hasattr(scene.world, "mist_settings"):
+        scene.world.mist_settings.use_mist = True
+        scene.world.mist_settings.start = float(mist_start)
+        scene.world.mist_settings.depth = float(mist_depth)
+        scene.world.mist_settings.falloff = 'QUADRATIC'
+
+    world = scene.world or bpy.data.worlds.new("VM_AerialWorld")
+    scene.world = world
+    world.use_nodes = True
+    nt = world.node_tree
+    nt.nodes.clear()
+
+    out = nt.nodes.new("ShaderNodeOutputWorld")
+    lp = nt.nodes.new("ShaderNodeLightPath")
+    mix_bg = nt.nodes.new("ShaderNodeMixShader")
+
+    bg_illum = nt.nodes.new("ShaderNodeBackground")
+    bg_illum.inputs["Color"].default_value = (sky_horizon[0] * 0.65, sky_horizon[1] * 0.68, sky_horizon[2] * 0.75, 1.0)
+    bg_illum.inputs["Strength"].default_value = float(ambient_strength)
+
+    bg_cam = nt.nodes.new("ShaderNodeBackground")
+    bg_cam.inputs["Strength"].default_value = 1.15
+
+    coord = nt.nodes.new("ShaderNodeTexCoord")
+    mapping = nt.nodes.new("ShaderNodeMapping")
+    mapping.inputs["Scale"].default_value = (1.8, 1.8, 4.2 if not add_planetary_arc else 2.2)
+
+    noise_hi = nt.nodes.new("ShaderNodeTexNoise")
+    noise_hi.inputs["Scale"].default_value = 5.5
+    noise_hi.inputs["Detail"].default_value = 9.0
+    noise_hi.inputs["Roughness"].default_value = 0.62
+
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    c_lo = max(0.10, 0.42 - cloud_contrast * 0.25)
+    c_hi = min(0.92, 0.62 + cloud_contrast * 0.22)
+    ramp.color_ramp.elements[0].position = c_lo
+    ramp.color_ramp.elements[0].color = (sky_zenith[0], sky_zenith[1], sky_zenith[2], 1.0)
+    ramp.color_ramp.elements[1].position = c_hi
+    ramp.color_ramp.elements[1].color = (cloud_bright[0], cloud_bright[1], cloud_bright[2], 1.0)
+
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    horizon_ramp = nt.nodes.new("ShaderNodeValToRGB")
+    horizon_ramp.color_ramp.elements[0].position = 0.0
+    horizon_ramp.color_ramp.elements[0].color = (sky_horizon[0], sky_horizon[1], sky_horizon[2], 1.0)
+    horizon_ramp.color_ramp.elements[1].position = 0.38 if not add_planetary_arc else 0.55
+    horizon_ramp.color_ramp.elements[1].color = (sky_zenith[0], sky_zenith[1], sky_zenith[2], 1.0)
+
+    mix_col = nt.nodes.new("ShaderNodeMixRGB")
+    mix_col.blend_type = 'MIX'
+    mix_col.inputs["Fac"].default_value = 0.62
+
+    nt.links.new(coord.outputs["Generated"], mapping.inputs["Vector"])
+    nt.links.new(coord.outputs["Generated"], sep.inputs["Vector"])
+    nt.links.new(sep.outputs["Z"], horizon_ramp.inputs["Fac"])
+    nt.links.new(mapping.outputs["Vector"], noise_hi.inputs["Vector"])
+    nt.links.new(noise_hi.outputs["Fac"], ramp.inputs["Fac"])
+    nt.links.new(horizon_ramp.outputs["Color"], mix_col.inputs["Color1"])
+    nt.links.new(ramp.outputs["Color"], mix_col.inputs["Color2"])
+    nt.links.new(mix_col.outputs["Color"], bg_cam.inputs["Color"])
+
+    nt.links.new(lp.outputs["Is Camera Ray"], mix_bg.inputs["Fac"])
+    nt.links.new(bg_illum.outputs["Background"], mix_bg.inputs[1])
+    nt.links.new(bg_cam.outputs["Background"], mix_bg.inputs[2])
+    nt.links.new(mix_bg.outputs["Shader"], out.inputs["Surface"])
+    return world
 """,
 }

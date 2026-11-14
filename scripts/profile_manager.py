@@ -63,10 +63,38 @@ SPATIAL_ARCHETYPES = [
         "builder_hint": "build_endless_ground + build_grounded_backdrop_ridge",
         "brief": "无方边穿帮的大尺度自然地表/浅水岸线与底座扎入地下的远山层次",
     },
+    {
+        "id": "megastructure_horizon",
+        "name": "写实人间近景与远景巨构天际线并置",
+        "spatial_mode": "grounded",
+        "builder_hint": "build_endless_ground + build_megastructure_horizon + setup_aerial_perspective_world",
+        "brief": "近处是充满生机的写实溪流草地、松林湖面或街巷，百米外天际线矗立着被大气雾气洗淡的沉默科幻巨构或悬浮母舰",
+    },
 ]
 
 # 广谱艺术与空间设计流派库（avant_garde=True 代表跳出传统写实沙盘的前卫/非常规空间范式）
 ART_MOVEMENTS = [
+    {
+        "id": "scifi_grounded_reality",
+        "name": "真实下的科幻与巨构并置 (Sci-Fi in Reality)",
+        "avant_garde": True,
+        "recommended_archetypes": ["megastructure_horizon", "open_landscape", "canyon_megastructure"],
+        "cues": "前景是触手可及的写实自然溪石、野花草坡或迷雾湖面，远方数百米外的云雾里却静静立着风化的巨型星际堡垒或悬浮椭圆母舰",
+    },
+    {
+        "id": "holographic_industrial_sanctum",
+        "name": "全息数据矩阵与工业圣殿 (Holographic Industrial)",
+        "avant_garde": True,
+        "recommended_archetypes": ["canyon_megastructure", "vertical_atrium", "interior_hall"],
+        "cues": "沉重的暗色反应堆巨柱与平静水池上方，悬浮着高密度半透明青色全息电路面板与天穹六边形星盘网格",
+    },
+    {
+        "id": "inverted_sky_metropolis",
+        "name": "天穹倒悬双城与宏观重力奇观 (Inverted Horizon)",
+        "avant_garde": True,
+        "recommended_archetypes": ["megastructure_horizon", "floating_noneuclidean"],
+        "cues": "地面城市或平静海面的正上方，整片天空倒挂着另一座高密度写实城市群或巨型倒置黑金字塔，中央由通天巨塔相连",
+    },
     {
         "id": "liminal_poolcore",
         "name": "阈限空间与池核 (Liminal / Poolcore)",
@@ -323,6 +351,8 @@ def export_requirements(session_data, output_path=None):
         "spatial_topology": {
             "spatial_archetype": s.get("spatial_archetype", ""),
             "spatial_mode": s.get("spatial_mode", "grounded"),
+            "complexity_tier": s.get("complexity_tier", "tier2_architectural"),
+            "structural_entropy": s.get("structural_entropy", "intact_order"),
         },
         "style": {
             "art_movement": s.get("art_movement", ""),
