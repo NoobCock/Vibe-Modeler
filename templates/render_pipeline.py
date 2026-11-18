@@ -216,6 +216,23 @@ POST_PROCESS_PRESETS = {
         "contrast_saturation": {"brightness": 1.5, "contrast": 6.0, "saturation": 1.12},
         "vignette": {"strength": 0.16, "scale": 0.88, "feather": 0.22},
     },
+    "bright_luminous_daylight": {
+        "mist": {"start": 32.0, "depth": 190.0, "falloff": "QUADRATIC", "color": (0.78, 0.91, 0.99, 1.0), "strength": 0.14},
+        "ao_boost": {"strength": 0.12},
+        "glare": {"glare_type": "Bloom", "threshold": 0.88, "strength": 0.30, "size": 0.62},
+        "color_balance": {"lift": (1.00, 1.01, 1.02, 1.0), "gamma": (1.01, 1.02, 1.02, 1.0), "gain": (1.02, 1.03, 1.02, 1.0), "factor": 0.45},
+        "contrast_saturation": {"brightness": 1.0, "contrast": 4.0, "saturation": 1.08},
+        "vignette": {"strength": 0.08, "scale": 0.92, "feather": 0.28},
+    },
+    "vibrant_futuristic_gloss": {
+        "mist": {"start": 24.0, "depth": 170.0, "falloff": "QUADRATIC", "color": (0.72, 0.89, 1.0, 1.0), "strength": 0.16},
+        "ao_boost": {"strength": 0.16},
+        "glare": {"glare_type": "Bloom", "threshold": 0.84, "strength": 0.36, "size": 0.58},
+        "color_balance": {"lift": (0.98, 1.01, 1.03, 1.0), "gamma": (1.01, 1.02, 1.03, 1.0), "gain": (1.03, 1.04, 1.03, 1.0), "factor": 0.50},
+        "contrast_saturation": {"brightness": 0.5, "contrast": 6.0, "saturation": 1.10},
+        "vignette": {"strength": 0.12, "scale": 0.90, "feather": 0.25},
+        "lens_distortion": {"dispersion": 0.005, "distortion": -0.003},
+    },
 }
 
 def _resolve_post_process_config(post_process):

@@ -191,9 +191,9 @@ def preflight_check(
       - "floating"（超现实失重/非欧空间）：豁免浮空与相机在地下误报
       - "framed"（窗框/纱帘近景框景）：适配框景构图，豁免远端地面边缘检查
     complexity_tier:
-      - "tier1_intimate"：精致室内/特写（剔除地面墙壳后，净内容单元硬红线 >= 38，推荐 80~160+）
-      - "tier2_architectural"（默认）：建筑中庭/走廊/抽象构成（剔除外壳后，净内容单元硬红线 >= 75，推荐 160~320+）
-      - "tier3_spectacular"：宏大奇观/真实下的科幻/崩塌巨构（剔除外壳后，净内容单元硬红线 >= 150，推荐 300~700+）
+      - "tier1_intimate"：精致室内/特写/极简静物（剔除地面墙壳后，净内容单元门禁 >= 18，推荐 45~100+）
+      - "tier2_architectural"（默认）：建筑中庭/广场/庭院/生态空间/抽象构成（剔除外壳后，净内容单元门禁 >= 32，推荐 80~180+）
+      - "tier3_spectacular"：宏大奇观/大型城市/开阔地景/科幻巨构（剔除外壳后，净内容单元门禁 >= 60，推荐 150~320+）
     '''
     import json
     import math as _m
@@ -432,14 +432,14 @@ def preflight_check(
                         f"立柱 {o.name} 柱顶(Z={mx.z:.2f}m)与上方顶板 {up_hit[2].name}(Z={up_hit[0].z:.2f}m) 之间悬空脱节 {top_gap:.2f} 米，请拉高柱高嵌入顶板"
                     )
 
-    # 6. 画面内容饱和度与九宫格防空洞硬门禁（防止模型把最低配额当成大致范围，只放十几个方块交差）
+    # 6. 画面内容饱和度与九宫格防空洞门禁（按画风适配层次丰富度，不强迫特定固定道具）
     tier_key = str(complexity_tier or "tier2_architectural").lower().strip()
     if "tier1" in tier_key or "intimate" in tier_key:
-        min_content_units, target_units = 38, 95
+        min_content_units, target_units, min_sectors = 18, 45, 4
     elif "tier3" in tier_key or "spectacular" in tier_key:
-        min_content_units, target_units = 150, 320
+        min_content_units, target_units, min_sectors = 60, 150, 5
     else:
-        min_content_units, target_units = 75, 180
+        min_content_units, target_units, min_sectors = 32, 80, 5
 
     shell_tokens = (
         "_floor", "_wallback", "_wallfront", "_wallleft", "_wallright",
@@ -452,17 +452,31 @@ def preflight_check(
     for o in scene.objects:
         if o.type not in ('MESH', 'CURVE', 'FONT', 'SURFACE') or o.hide_render or _vm_is_volume_or_helper(o):
             continue
+        # 先统计散布/粒子类 Geometry Nodes（即使挂在 EndlessGround / 地面外壳上也应计入环境细节）
+        gn_scatter_units = 0
+        for mod in getattr(o, "modifiers", []):
+            if mod.type == 'NODES' and getattr(mod, "node_group", None) is not None:
+                ng = mod.node_group
+                has_inst = any(getattr(nd, "bl_idname", "") == "GeometryNodeInstanceOnPoints" for nd in ng.nodes)
+                if has_inst or any(k in ng.name.lower() for k in ("scatter", "mote", "foliage")):
+                    gn_scatter_units += 24
+        content_units += gn_scatter_units
+
         if o == main_ground or o.get("vm_is_ceiling"):
             continue
         lname = o.name.lower()
         if any(tok in lname for tok in shell_tokens):
             continue
         unit_weight = 1
+        if o.type == 'MESH' and getattr(o, "data", None) is not None:
+            poly_cnt = len(o.data.polygons)
+            if poly_cnt >= 400:
+                unit_weight += 2
+            elif poly_cnt >= 120:
+                unit_weight += 1
         for mod in getattr(o, "modifiers", []):
             if mod.type == 'ARRAY' and getattr(mod, "count", 1) > 1:
-                unit_weight += min(45, int(mod.count) - 1)
-            elif mod.type == 'NODES':
-                unit_weight += 28
+                unit_weight += min(32, int(mod.count) - 1)
         content_units += unit_weight
 
         bb = _vm_world_bbox(o)
@@ -488,19 +502,20 @@ def preflight_check(
         "min_required_units": min_content_units,
         "recommended_target_units": target_units,
         "occupied_screen_sectors_of_9": len(occupied_sectors),
+        "min_required_sectors": min_sectors,
     }
     if content_units < min_content_units:
         issues.append(
-            f"画面内容密度严重不足：剔除地面/墙壁大外壳后，净内容构件仅有 {content_units} 个"
-            f"（当前档位 {tier_key} 刚性最低红线为 {min_content_units} 个，推荐饱和目标为 {target_units}+ 个），画面会显得空洞无味！"
-            f"请按【四频饱满度法则】继续补充：① 3~4 组中观副体结构簇（Secondary Clusters）；"
-            f"② 主体与立面的高频 Greebles / 散热鳍片环（build_profiled_machined_ring）；"
-            f"③ 空间碎晶气旋（build_shattered_shard_vortex）/ 六边形晶圆矩阵（build_hex_wafer_array）/ 全息电路阵列（build_holographic_data_matrix）"
+            f"画面内容密度不足：剔除地面/墙壁大外壳后，净内容单元为 {content_units} 个"
+            f"（当前档位 {tier_key} 最低要求 {min_content_units} 个，推荐丰富度 {target_units}+ 个），画面容易显得单薄。"
+            f"请严格围绕当前场景自身的题材与画风补充合理的层次与结构细节（严禁为了凑数而跨画风拼凑不相关的配件）："
+            f"例如细化主体拆件与建筑构件（门窗棂格/檐口/拱肋/台阶/扶手/器皿结构）、增加符合语境的中观副体群落（植物/座椅/灯具/水景/配景建筑）、"
+            f"或利用 ARRAY / apply_gn_surface_scatter 丰富环境微观细节。"
         )
-    if len(occupied_sectors) < 5:
+    if len(occupied_sectors) < min_sectors:
         issues.append(
-            f"画面九宫格构图过于空旷：3x3 屏幕分区中仅有 {len(occupied_sectors)}/9 个区块落入实体内容物（至少需覆盖 5/9 个区块），四周留白过多！"
-            f"请在近景两侧（距相机 1.5~4m）、中景侧翼及远景补充具有前后纵深遮挡关系的副体构筑物或悬浮阵列"
+            f"画面九宫格构图过于空旷：3x3 屏幕分区中仅有 {len(occupied_sectors)}/9 个区块落入实体内容物（当前档位至少需覆盖 {min_sectors}/9 个区块），四周留白过多！"
+            f"请在前景两侧（距相机 1.5~4m）、中景侧翼及远景天际线补充符合当前画风的前后纵深构筑物、植被或空间层次"
         )
 
     report["ok"] = not issues

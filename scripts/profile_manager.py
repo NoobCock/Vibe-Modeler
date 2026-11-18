@@ -1,13 +1,16 @@
 """
 profile_manager.py
-Vibe-Modeler 双模式用户需求导出、偏好画像与广谱艺术/空间发散抽样工具 (v3.0)
+Vibe-Modeler 双模式用户需求导出、偏好画像与广谱艺术/空间发散抽样工具 (v3.2)
 
 1. 自动剥离选项里的 "(Recommended)" / "（上次评分低）" 等标签，防止脏数据写入画像
 2. 同时支持“简易模式（1 题总评）”与“详细模式（4 维打分）”，记录沟通模式偏好、空间拓扑与艺术流派
-3. 提问前调用 `--hints`：读取历史评分，并从 6 大空间拓扑 + 14 种艺术流派谱系中动态抽取不重复的跨流派发散建议（强制包含至少 3 种非平地空间拓扑与至少 3 种非常规/前卫空间流派）
-4. 生成单次创作流程图
+3. 开场前调用 `--hints`：仅输出用户历史偏好（prefer/caution/avoid/recent_scenes/preferred_mode/warmth_affinity），不注入随机场景种子
+4. 仅当用户主动选择“提供场景灵感”时调用 `--inspire`：从六大美学家族与十大空间拓扑中均衡抽取跨流派灵感跳板（不绑定任何单一参考图或固定模板组合）
+5. 生成单次创作流程图
 
-命令行：python scripts/profile_manager.py --hints
+命令行：
+  python scripts/profile_manager.py --hints
+  python scripts/profile_manager.py --inspire
 """
 
 import os
@@ -19,234 +22,284 @@ import random
 
 PROFILE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "user_profile.json"))
 
-# 八大平等空间拓扑（打破“平地+摆件”与“全写实具象”定势，强制包含纯粹抽象与非欧虚空）
+# 十大平等空间拓扑（以经典通用基础拓扑为先，涵盖室内、自然地景、柱廊峡谷、框景、抽象构成与公共空间，不预设固定模板组合配方）
 SPATIAL_ARCHETYPES = [
     {
-        "id": "abstract_geometric_void",
-        "name": "纯粹抽象构成与高维意识虚空",
-        "spatial_mode": "floating",
-        "quadrant": "abstract",
-        "builder_hint": "build_profiled_machined_ring + build_hex_wafer_array + build_shattered_shard_vortex",
-        "brief": "彻底抛弃现实建筑与自然地景，在纯粹的色彩与光雾虚空中，用精密蚀刻星环、六边形晶圆棱晶矩阵、原色几何切片与折射光束构筑高维精神或抽象视觉构成",
-    },
-    {
-        "id": "floating_noneuclidean",
-        "name": "无地面失重悬浮与非欧视错觉空间",
-        "spatial_mode": "floating",
-        "quadrant": "abstract",
-        "builder_hint": "build_impossible_stair_loop / build_gravity_flip_room / build_spiral_stair_ribbon",
-        "brief": "彻底取消地面或打破重力常数，正交闭合彭罗斯死循环阶梯、四面墙与天花板多向重力交错、或悬空旋梯与倒悬器物",
-    },
-    {
         "id": "interior_hall",
-        "name": "封闭室内与阈限走廊大厅",
+        "name": "封闭室内与安静大厅",
         "spatial_mode": "interior",
-        "quadrant": "surreal_liminal",
-        "builder_hint": "build_enclosed_room",
-        "brief": "相机位于有顶棚、墙面、门窗洞或柱列的内部空间（如白蓝水池大厅、无限走廊、静谧展厅）",
+        "family": "enclosure_light",
+        "brief": "相机位于有顶棚、墙面、门窗洞或柱列的内部空间（如展厅、起居室、泳池大厅或复古机房），可用原创 BMesh 建构或可选空间骨架",
+    },
+    {
+        "id": "open_landscape",
+        "name": "开阔自然地景与海岸山谷",
+        "spatial_mode": "grounded",
+        "family": "landscape_plaza",
+        "brief": "无方边穿帮的大尺度自然地表/浅水岸线与底座扎入地下的远山层次，结合 CC0 植物岩石与程序化地貌",
+    },
+    {
+        "id": "canyon_megastructure",
+        "name": "两侧夹峙建筑峡谷与拱券柱廊",
+        "spatial_mode": "grounded",
+        "family": "architectural_axis",
+        "brief": "左右高耸柱廊、拱券或街巷立面夹出深邃纵向通道，形成明确透视引导线",
     },
     {
         "id": "vertical_atrium",
         "name": "多层垂直中庭与阶梯深井",
         "spatial_mode": "interior",
-        "quadrant": "architectural_stylized",
-        "builder_hint": "build_vertical_atrium + create_volumetric_light_beam",
-        "brief": "纵向多层回廊、铁艺/混凝土阳台与跨层楼梯叠落，高处斜射丁达尔光束",
-    },
-    {
-        "id": "canyon_megastructure",
-        "name": "两侧夹峙建筑峡谷与巨构",
-        "spatial_mode": "grounded",
-        "quadrant": "architectural_stylized",
-        "builder_hint": "build_canyon_corridor",
-        "brief": "左右高耸肋柱或建筑立面夹出深邃纵向通道，低角度仰望尽头尖塔或天光窄缝",
+        "family": "enclosure_light",
+        "brief": "纵向多层回廊、阳台与跨层楼梯叠落，高处斜射自然天光或体积光束",
     },
     {
         "id": "window_framing",
         "name": "近景窗框与半透帘幕框景",
         "spatial_mode": "framed",
-        "quadrant": "surreal_liminal",
-        "builder_hint": "build_window_frame_stage",
-        "brief": "透过微风吹拂的半透明前景纱帘与窗框，近看窗台器皿小花与窗外极简远景",
+        "family": "intimate_framed",
+        "brief": "透过微风吹拂的半透明前景纱帘与窗框，近看窗台日常器皿与窗外明朗远景",
+    },
+    {
+        "id": "abstract_geometric_void",
+        "name": "纯粹几何构成与光学雕塑虚空",
+        "spatial_mode": "floating",
+        "family": "abstract_paradox",
+        "brief": "脱离现实房间与地面约束，用自定义 BMesh/CURVE 交错悬浮的彩玻板片、金属弧面与光学棱柱构筑雕塑感抽象构成",
     },
     {
         "id": "megastructure_horizon",
-        "name": "写实人间近景与远景巨构天际线并置",
+        "name": "写实近景与远景天际线建筑并置",
         "spatial_mode": "grounded",
-        "quadrant": "scifi_spectacle",
-        "builder_hint": "build_endless_ground + build_megastructure_horizon + setup_aerial_perspective_world",
-        "brief": "近处是写实溪流草地、松林湖面或街巷，百米外天际线矗立着被大气雾气洗淡的沉默科幻巨构或悬浮母舰",
+        "family": "landscape_plaza",
+        "brief": "近处是亲切的自然水岸、草坡或街道，远方天际线矗立着流线型高塔或大型构筑物",
     },
     {
-        "id": "open_landscape",
-        "name": "开阔自然地景与水域",
+        "id": "terraced_water_plaza",
+        "name": "多级弧形露台与水景花园广场",
         "spatial_mode": "grounded",
-        "quadrant": "architectural_stylized",
-        "builder_hint": "build_endless_ground + build_grounded_backdrop_ridge",
-        "brief": "无方边穿帮的大尺度自然地表/浅水岸线与底座扎入地下的远山层次",
+        "family": "landscape_plaza",
+        "brief": "层叠弧形平台、洁净镜面水池、飘带式步行天桥与曲线绿植槽构成的开放公共空间或海岸观景台",
+    },
+    {
+        "id": "curved_glass_pavilion",
+        "name": "曲线玻璃穹顶与通透生态展馆",
+        "spatial_mode": "interior",
+        "family": "enclosure_light",
+        "brief": "流畅曲面玻璃天顶、通透采光结构与室内水景绿植共同组成的明亮开放大厅或生态温室",
+    },
+    {
+        "id": "floating_noneuclidean",
+        "name": "无地面失重与非欧视错觉空间",
+        "spatial_mode": "floating",
+        "family": "abstract_paradox",
+        "brief": "打破常规重力方向，正交闭合死循环阶梯、四向重力翻转房间或云端无支撑螺旋阶梯",
     },
 ]
 
-# 广谱艺术与空间设计流派库（按 abstract / surreal_liminal / scifi_spectacle / architectural_stylized 四大象限分层配额抽样）
+# 广谱艺术与空间设计流派库（以经典建筑与自然地景为先，按 6 大美学家族分层抽样，拒绝单一参考图绑架）
 ART_MOVEMENTS = [
-    # --- 象限 1：纯粹抽象 / 意识维度 / 几何构成 / 非欧悖论 (quadrant="abstract") ---
+    # --- 家族 1：建筑空间与文化光影 (family="architectural_interior") ---
     {
-        "id": "abstract_consciousness_core",
-        "name": "高维意识星冕与抽象精密核心 (Abstract Consciousness / Chrono-Core)",
-        "avant_garde": True,
-        "quadrant": "abstract",
-        "recommended_archetypes": ["abstract_geometric_void", "floating_noneuclidean"],
-        "cues": "完全脱离现实房间与地面，在深邃星云色域中悬浮多层精密蚀刻金环、径向散热光翼与六边形折射棱晶矩阵，用纯粹的几何节奏与焦外光斑构筑精神维度",
-    },
-    {
-        "id": "suprematism_kinetic_geometry",
-        "name": "至上主义与动态几何构成 (Suprematism / Kinetic Geometry)",
-        "avant_garde": True,
-        "quadrant": "abstract",
-        "recommended_archetypes": ["abstract_geometric_void", "floating_noneuclidean"],
-        "cues": "没有任何具象建筑与日常器物，纯粹由悬浮咬合的哑光色彩切片、磨砂折射玻璃几何体、细长金属平衡杆与冷暖切割光束构成极具张力的抽象画面",
-    },
-    {
-        "id": "non_euclidean_paradox",
-        "name": "非欧几里得与视错觉悖论 (Non-Euclidean Paradox)",
-        "avant_garde": True,
-        "quadrant": "abstract",
-        "recommended_archetypes": ["floating_noneuclidean", "abstract_geometric_void"],
-        "cues": "用正交镜头做出首尾咬合的彭罗斯死循环阶梯，或者让上下左右四个方向的重力同时翻转，构筑挑战空间直觉的几何迷宫",
-    },
-    {
-        "id": "shattered_expressionism",
-        "name": "碎裂几何与表现主义气旋 (Shattered Silhouette)",
-        "avant_garde": True,
-        "quadrant": "abstract",
-        "recommended_archetypes": ["abstract_geometric_void", "floating_noneuclidean"],
-        "cues": "冷灰蓝虚空里倾斜穿插着解构的几何剪影，上百枚锋利的立体镜面碎晶围绕发光核心定格成旋转气旋，仅用少量高纯度亮色碎片点亮视觉中心",
-    },
-    {
-        "id": "bauhaus_constructivism",
-        "name": "包豪斯构成主义几何 (Bauhaus / De Stijl)",
+        "id": "minimalist_architecture",
+        "name": "现代极简光影空间 (Minimalist Architecture)",
         "avant_garde": False,
-        "quadrant": "abstract",
-        "recommended_archetypes": ["abstract_geometric_void", "floating_noneuclidean", "interior_hall"],
-        "cues": "红黄蓝原色几何板片、半透彩玻圆盘和细黑钢架在空中穿插咬合，画面干净利落，充满纯粹的现代构成韵律",
+        "family": "architectural_interior",
+        "recommended_archetypes": ["interior_hall", "canyon_megastructure", "open_landscape"],
+        "cues": "干净舒展的清水混凝土或白墙切面留出利落采光口，阳光穿过浅水庭院在墙面上映出安静的切割光斑",
     },
     {
-        "id": "lowpoly_faceted",
-        "name": "低多边形硬切面构成 (Low-Poly Faceted)",
+        "id": "east_asian_courtyard",
+        "name": "东方园林与木构光影 (East Asian Courtyard)",
         "avant_garde": False,
-        "quadrant": "abstract",
-        "recommended_archetypes": ["abstract_geometric_void", "floating_noneuclidean", "open_landscape"],
-        "cues": "故意保留硬朗利落的多边形切角晶面，让相邻几何面片在冷暖对撞灯光下呈现出像折纸雕塑一样的块面构成感",
-    },
-
-    # --- 象限 2：超现实梦境 / 阈限异境 (quadrant="surreal_liminal") ---
-    {
-        "id": "surrealism_antigravity",
-        "name": "超现实失重梦境 (Surrealism)",
-        "avant_garde": True,
-        "quadrant": "surreal_liminal",
-        "recommended_archetypes": ["floating_noneuclidean", "abstract_geometric_void"],
-        "cues": "把平时沉重的器物或古典残件倒着悬在流云与虚空里，周围绕着没有支撑的螺旋阶梯与细长的发光星轨",
+        "family": "architectural_interior",
+        "recommended_archetypes": ["window_framing", "interior_hall", "open_landscape"],
+        "cues": "深色木格栅门窗、月洞门框景、静水倒影与青苔汀步石，光影穿过格栅投下细密柔和的影子",
     },
     {
-        "id": "liminal_poolcore",
-        "name": "阈限空间与池核梦核 (Liminal / Poolcore)",
-        "avant_garde": True,
-        "quadrant": "surreal_liminal",
-        "recommended_archetypes": ["interior_hall", "vertical_atrium"],
-        "cues": "空无一人的白蓝瓷砖大厅或浅水迷宫走廊，头顶格栅透下均匀柔光，整个空间明亮干净却带着安静的疏离与梦境感",
-    },
-    {
-        "id": "translucent_window_dream",
-        "name": "半透窗景与微风极简 (Translucent Framing)",
-        "avant_garde": True,
-        "quadrant": "surreal_liminal",
-        "recommended_archetypes": ["window_framing"],
-        "cues": "微风吹起的半透明薄纱贴在镜头前，透过柔光看窗台上装着冷暖渐变水的折射玻璃器皿与窗外极简色块",
-    },
-    {
-        "id": "sacred_monument_halo",
-        "name": "神圣几何巨碑与天顶光环 (Monumental Halo)",
-        "avant_garde": True,
-        "quadrant": "surreal_liminal",
-        "recommended_archetypes": ["floating_noneuclidean", "canyon_megastructure"],
-        "cues": "极简的暗色水面或虚空中央拔地而起一座分裂的几何巨碑，碑顶正对着天空悬浮的多重精密发光圆环",
-    },
-
-    # --- 象限 3：真实下的科幻 / 跨尺度奇观并置 (quadrant="scifi_spectacle") ---
-    {
-        "id": "scifi_grounded_reality",
-        "name": "真实下的科幻与巨构并置 (Sci-Fi in Reality)",
-        "avant_garde": True,
-        "quadrant": "scifi_spectacle",
-        "recommended_archetypes": ["megastructure_horizon", "open_landscape"],
-        "cues": "前景是触手可及的写实自然溪石、野花草坡或迷雾湖面，远方数百米外的云雾里却静静立着风化的巨型星际堡垒或悬浮椭圆母舰",
-    },
-    {
-        "id": "holographic_industrial_sanctum",
-        "name": "全息数据矩阵与工业圣殿 (Holographic Industrial)",
-        "avant_garde": True,
-        "quadrant": "scifi_spectacle",
-        "recommended_archetypes": ["canyon_megastructure", "vertical_atrium", "interior_hall"],
-        "cues": "沉重的暗色反应堆巨柱与平静水池上方，悬浮着高密度半透明青色全息电路面板与天穹六边形星盘网格",
-    },
-    {
-        "id": "inverted_sky_metropolis",
-        "name": "天穹倒悬双城与宏观重力奇观 (Inverted Horizon)",
-        "avant_garde": True,
-        "quadrant": "scifi_spectacle",
-        "recommended_archetypes": ["megastructure_horizon", "floating_noneuclidean"],
-        "cues": "平静水面或地面的正上方，整片天空倒挂着另一座高密度城市剪影或巨型倒置黑曜石金字塔，中央由通天巨塔相连",
-    },
-    {
-        "id": "cassette_futurism",
-        "name": "复古磁带未来工业 (Cassette Futurism)",
+        "id": "art_deco_monument",
+        "name": "装饰艺术与对称几何殿堂 (Art Deco)",
         "avant_garde": False,
-        "quadrant": "scifi_spectacle",
-        "recommended_archetypes": ["interior_hall", "canyon_megastructure"],
-        "cues": "米白配暗橙色的厚重圆角机柜排成阵列，老式弧面荧光屏在幽暗空间里泛着绿光或琥珀色扫描线微光",
+        "family": "architectural_interior",
+        "recommended_archetypes": ["vertical_atrium", "interior_hall", "canyon_megastructure"],
+        "cues": "对称竖向凹槽壁柱、阶梯拱门、磨砂琥珀洗墙灯与深色大理石配温润黄铜线条，秩序庄重而华丽",
     },
-
-    # --- 象限 4：建筑巨构 / 风格化光影空间 (quadrant="architectural_stylized") ---
     {
         "id": "brutalism_megastructure",
         "name": "粗野主义混凝土巨构 (Brutalism)",
         "avant_garde": True,
-        "quadrant": "architectural_stylized",
+        "family": "architectural_interior",
         "recommended_archetypes": ["canyon_megastructure", "vertical_atrium", "interior_hall"],
-        "cues": "成排高耸的裸露水泥巨柱与挑空栈桥夹出窄深通道，头顶只留一线天光，用强烈的体量对比衬出人在里面的渺小",
+        "cues": "成排高耸的裸露水泥巨柱与挑空栈桥夹出窄深通道，用强烈的体量对比衬出建筑的厚重纪念碑感",
     },
     {
         "id": "vertical_lightshaft_atrium",
         "name": "垂直光井与层叠回廊 (Light-Shaft Atrium)",
         "avant_garde": True,
-        "quadrant": "architectural_stylized",
+        "family": "architectural_interior",
         "recommended_archetypes": ["vertical_atrium"],
-        "cues": "近处是偏暗的石阶与灯柱，往上是好几层叠在一起的镂空回廊，淹没在从高处斜照下来的明亮暖雾光束里",
+        "cues": "多层次叠落的回廊栏杆与阶梯，高处斜射下来的明亮体积光束切开安静的室内空间",
+    },
+
+    # --- 家族 2：自然地景与生态人文 (family="nature_and_horizon") ---
+    {
+        "id": "pastoral_coastal_horizon",
+        "name": "明媚海岸与自然地景画卷 (Coastal / Pastoral)",
+        "avant_garde": False,
+        "family": "nature_and_horizon",
+        "recommended_archetypes": ["open_landscape", "window_framing", "terraced_water_plaza"],
+        "cues": "清澈海面或起伏绿丘、自然植被碎石与远山层叠，搭配木栈道、灯塔或海滨白色拱廊，气氛舒朗放松",
+    },
+    {
+        "id": "overgrown_sanctuary",
+        "name": "静谧废墟与植物共生圣所 (Overgrown Sanctuary)",
+        "avant_garde": False,
+        "family": "nature_and_horizon",
+        "recommended_archetypes": ["canyon_megastructure", "open_landscape", "interior_hall"],
+        "cues": "被蕨类、藤蔓与野花悄然接管的古典石柱拱廊或老旧建筑，林间天光透下安静温柔的时间感",
+    },
+    {
+        "id": "scifi_grounded_reality",
+        "name": "写实近景与远景异质构筑并置 (Sci-Fi in Reality)",
+        "avant_garde": True,
+        "family": "nature_and_horizon",
+        "recommended_archetypes": ["megastructure_horizon", "open_landscape"],
+        "cues": "近处是亲切的日常街道、草地或水岸，百米外天际线在空气透视雾中隐约耸立着流线高塔或大型飞行器",
+    },
+
+    # --- 家族 3：超现实、阈限与风格化动画 (family="surreal_and_liminal") ---
+    {
+        "id": "liminal_poolcore",
+        "name": "阈限空间与池核梦核 (Liminal / Poolcore)",
+        "avant_garde": True,
+        "family": "surreal_and_liminal",
+        "recommended_archetypes": ["interior_hall", "vertical_atrium"],
+        "cues": "空无一人的干净瓷砖水池或无限延展的柔和走廊，均匀天光下带着安静而微妙的梦境疏离感",
+    },
+    {
+        "id": "translucent_window_dream",
+        "name": "半透窗景与微风静物 (Translucent Framing)",
+        "avant_garde": True,
+        "family": "surreal_and_liminal",
+        "recommended_archetypes": ["window_framing"],
+        "cues": "微风吹起的半透明薄纱贴在镜头前，透过柔光看窗台上的日常玻璃器皿与窗外明朗海天",
+    },
+    {
+        "id": "surrealism_antigravity",
+        "name": "超现实失重梦境 (Surrealism)",
+        "avant_garde": True,
+        "family": "surreal_and_liminal",
+        "recommended_archetypes": ["floating_noneuclidean", "abstract_geometric_void"],
+        "cues": "熟悉的日常门框、家具或植物违背重力悬停在云海与长阶之上，用反常识的构图表达诗意梦境",
     },
     {
         "id": "atmospheric_anime",
         "name": "清透空气感二次元 (Atmospheric Anime)",
         "avant_garde": False,
-        "quadrant": "architectural_stylized",
-        "recommended_archetypes": ["window_framing", "open_landscape", "interior_hall"],
-        "cues": "像动画电影背景一样清爽的明暗色块配细线描边，明亮通透又带着清新的色彩情绪",
+        "family": "surreal_and_liminal",
+        "recommended_archetypes": ["window_framing", "open_landscape", "canyon_megastructure"],
+        "cues": "像动画电影背景一样清爽的明暗色块与柔和光斑，通透轻盈又带着鲜明的色彩情绪",
     },
     {
-        "id": "chiaroscuro_stage",
-        "name": "戏剧明暗舞台 (Chiaroscuro Stage)",
+        "id": "stylized_miniature_diorama",
+        "name": "微缩模型与切片微景箱 (Miniature Diorama)",
         "avant_garde": False,
-        "quadrant": "architectural_stylized",
-        "recommended_archetypes": ["interior_hall", "vertical_atrium", "abstract_geometric_void"],
-        "cues": "大片安静的暗背景里只打下一束锐利聚光灯，把中央主体的几何轮廓和长影清清楚楚切出来",
+        "family": "surreal_and_liminal",
+        "recommended_archetypes": ["interior_hall", "window_framing", "open_landscape"],
+        "cues": "像精雕细琢的建筑模型或手办沙盘，温润黏土/原木质感配柔和浅景深棚拍灯光",
+    },
+
+    # --- 家族 4：赛博都市与科技工业 (family="cyber_and_scifi") ---
+    {
+        "id": "cyberpunk_neon_alley",
+        "name": "赛博朋克与雨夜霓虹街景 (Cyberpunk Neon)",
+        "avant_garde": False,
+        "family": "cyber_and_scifi",
+        "recommended_archetypes": ["canyon_megastructure", "vertical_atrium"],
+        "cues": "雨后反光的湿润街巷、高架轨道与密集管线、暖橙与品红/青色霓虹招牌在夜雾里交错映照",
     },
     {
-        "id": "minimalist_architecture",
-        "name": "现代极简光影空间 (Minimalist Architecture)",
+        "id": "cassette_futurism",
+        "name": "复古磁带未来工业 (Cassette Futurism)",
         "avant_garde": False,
-        "quadrant": "architectural_stylized",
+        "family": "cyber_and_scifi",
         "recommended_archetypes": ["interior_hall", "canyon_megastructure"],
-        "cues": "干净的几何墙面上留出利落的采光口，阳光穿过浅水庭院在墙面上映出安静的切割光斑",
+        "cues": "米白配暗橙色的厚重圆角控制台与磁带机柜排成阵列，弧面老式显示器泛着温暖的琥珀或荧光绿微光",
+    },
+    {
+        "id": "holographic_industrial_sanctum",
+        "name": "全息数据中心与硬核工业 (Holographic Industrial)",
+        "avant_garde": True,
+        "family": "cyber_and_scifi",
+        "recommended_archetypes": ["canyon_megastructure", "vertical_atrium", "interior_hall"],
+        "cues": "深色混凝土/拉丝钢结构内景与半透明数据投影面板形成虚实对照",
+    },
+
+    # --- 家族 5：纯粹抽象与视错觉几何 (family="abstract_and_paradox") ---
+    {
+        "id": "suprematism_kinetic_geometry",
+        "name": "至上主义与动态几何构成 (Suprematism / Kinetic Geometry)",
+        "avant_garde": True,
+        "family": "abstract_and_paradox",
+        "recommended_archetypes": ["abstract_geometric_void", "floating_noneuclidean"],
+        "cues": "纯粹由悬浮咬合的哑光色彩切片、磨砂折射玻璃体、细长平衡杆与切割光束构成张力十足的抽象雕塑画面",
+    },
+    {
+        "id": "non_euclidean_paradox",
+        "name": "非欧几里得与视错觉悖论 (Non-Euclidean Paradox)",
+        "avant_garde": True,
+        "family": "abstract_and_paradox",
+        "recommended_archetypes": ["floating_noneuclidean"],
+        "cues": "用正交镜头做出首尾咬合的死循环阶梯，或者让上下左右四个方向的重力同时翻转，构筑挑战空间直觉的几何迷宫",
+    },
+    {
+        "id": "sculptural_light_geometry",
+        "name": "极简光学折射与曲面雕塑 (Optical Glass Sculpture)",
+        "avant_garde": True,
+        "family": "abstract_and_paradox",
+        "recommended_archetypes": ["abstract_geometric_void", "interior_hall"],
+        "cues": "在纯净背景里摆放半透色散棱镜、流线型哑光雕塑曲面与柔和焦散光影，强调光色折射与纯粹形式美",
+    },
+    {
+        "id": "bauhaus_constructivism",
+        "name": "包豪斯构成主义几何 (Bauhaus / De Stijl)",
+        "avant_garde": False,
+        "family": "abstract_and_paradox",
+        "recommended_archetypes": ["abstract_geometric_void", "interior_hall"],
+        "cues": "原色几何板片、半透彩玻圆弧与细长金属轴线在空间中穿插咬合，画面干净利落充满现代构成韵律",
+    },
+    {
+        "id": "lowpoly_faceted",
+        "name": "低多边形硬切面构成 (Low-Poly Faceted)",
+        "avant_garde": False,
+        "family": "abstract_and_paradox",
+        "recommended_archetypes": ["open_landscape", "abstract_geometric_void"],
+        "cues": "故意保留硬朗利落的多边形切角晶面，让相邻几何面片在冷暖灯光下呈现出折纸雕塑般的块面感",
+    },
+
+    # --- 家族 6：未来图景与生态乐观主义 (family="future_utopia") ---
+    {
+        "id": "frutiger_aero_utopia",
+        "name": "千禧生态玻璃与水景未来 (Frutiger Aero)",
+        "avant_garde": False,
+        "family": "future_utopia",
+        "recommended_archetypes": ["open_landscape", "terraced_water_plaza", "window_framing", "curved_glass_pavilion"],
+        "cues": "明亮晴空与蓬松白云下，以光洁流线曲面、通透蓝绿玻璃与清澈水体折射、翠绿植物群落为抽象设计语法，可自由构筑滨海长廊、嵌入草坡或水下的球穹、阳光交通露台或透光球体装置，洋溢轻盈乐观的千禧未来感",
+    },
+    {
+        "id": "solarpunk_botanical",
+        "name": "阳光生态乌托邦 (Solarpunk)",
+        "avant_garde": False,
+        "family": "future_utopia",
+        "recommended_archetypes": ["open_landscape", "terraced_water_plaza", "megastructure_horizon", "curved_glass_pavilion"],
+        "cues": "暖阳下的弧形木构与生态露台、攀援绿植与垂直花园、流动水渠和半嵌入丘陵的透明采光穹顶，展现人与自然科技温柔共生的多样空间剪影",
+    },
+    {
+        "id": "retro_futurism_space_age",
+        "name": "复古太空时代未来主义 (Space-Age / Googie)",
+        "avant_garde": False,
+        "family": "future_utopia",
+        "recommended_archetypes": ["open_landscape", "interior_hall", "terraced_water_plaza"],
+        "cues": "上世纪中叶乐观太空幻想：悬挑翼型屋檐、奶油白配珊瑚橙/薄荷绿烤漆曲面、流线型观景平台与高架轨道线条",
     },
 ]
 
@@ -399,6 +452,9 @@ def export_requirements(session_data, output_path=None):
     if not output_path:
         out_dir = s.get("output_dir") or os.getcwd()
         output_path = os.path.join(out_dir, "session_requirements.json")
+    parent_dir = os.path.dirname(os.path.abspath(output_path))
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
     req_data = {
         "export_time": time.strftime("%Y-%m-%d %H:%M:%S"),
         "tone_mode": s.get("tone_mode", "较富有激情的"),
@@ -513,67 +569,64 @@ def record_session(session_data, rating_data):
 
 def sample_divergent_directions(profile=None, seed=None):
     """
-    每次新对话按“四大审美象限（纯粹抽象/意识非欧、超现实/阈限、科幻奇观、建筑/风格化光影）”分层均衡抽取空间拓扑与流派：
-    - 强制包含至少 1~2 种【纯粹抽象 / 意识虚空 / 非欧几何构成】方向（彻底杜绝 5 个选项全偏写实具象场景！）
-    - 强制包含至少 3 种非平地空间拓扑（且至少 1 种为无地面 abstract/floating 拓扑）
+    当用户尚未设定具体主题/画面时，从 6 大美学家族与 10 种空间拓扑中均衡抽取不重复的灵感跳板：
+    - 每次从 6 个美学家族中随机选 5 个不同家族（避免任何单一美学流派或特定道具霸榜）
+    - 从不同空间家族抽取 4 种形态各异的空间拓扑（涵盖展馆、露台广场、室内、柱廊峡谷、自然地景或非欧/抽象等）
     - 自动避开最近几次刚用过的流派与拓扑
     """
     profile = profile or load_profile()
     rnd = random.Random(seed if seed is not None else time.time_ns())
     stats = profile.get("history_stats", {})
-    recent_movs = set(stats.get("recent_movements", [])[-3:])
-    recent_archs = set(stats.get("recent_archetypes", [])[-1:])
+    recent_movs = set(stats.get("recent_movements", [])[-4:])
+    recent_archs = set(stats.get("recent_archetypes", [])[-2:])
 
-    # 1. 分层抽取 4 种空间拓扑：
-    #    - 必抽 1~2 个纯粹抽象/无地面失重非欧拓扑 (abstract_geometric_void / floating_noneuclidean)
-    #    - 必抽 1~2 个室内/垂直/窗框立体拓扑 (interior_hall / vertical_atrium / window_framing / canyon_megastructure)
-    #    - 最多 1 个开阔或天际线贴地拓扑 (megastructure_horizon / open_landscape)
-    abs_archs = [a for a in SPATIAL_ARCHETYPES if a.get("quadrant") == "abstract"]
-    enclosed_archs = [
-        a for a in SPATIAL_ARCHETYPES
-        if a["id"] in ("interior_hall", "vertical_atrium", "window_framing", "canyon_megastructure")
-        and a["id"] not in recent_archs and a["name"] not in recent_archs
-    ] or [a for a in SPATIAL_ARCHETYPES if a["id"] in ("interior_hall", "vertical_atrium", "window_framing", "canyon_megastructure")]
-    grounded_archs = [a for a in SPATIAL_ARCHETYPES if a["id"] in ("megastructure_horizon", "open_landscape")]
-
+    # 1. 从不同空间家族均匀抽取 4 种空间拓扑
+    arch_families = list(dict.fromkeys(a.get("family", "other") for a in SPATIAL_ARCHETYPES))
+    rnd.shuffle(arch_families)
     picked_archs = []
-    # 保证至少 1 个（50% 概率 2 个）纯粹抽象/无地面非欧空间
-    n_abs_arch = rnd.choice([1, 2])
-    picked_archs.extend(rnd.sample(abs_archs, min(n_abs_arch, len(abs_archs))))
-    picked_archs.extend(rnd.sample(enclosed_archs, min(3 - len(picked_archs), len(enclosed_archs))))
-    rem_pool = [a for a in (enclosed_archs + grounded_archs) if a not in picked_archs]
-    if rem_pool and len(picked_archs) < 4:
-        picked_archs.append(rnd.choice(rem_pool))
+    for fam in arch_families[:4]:
+        pool = [
+            a for a in SPATIAL_ARCHETYPES
+            if a.get("family") == fam and a["id"] not in recent_archs and a["name"] not in recent_archs
+        ] or [a for a in SPATIAL_ARCHETYPES if a.get("family") == fam]
+        if pool:
+            picked_archs.append(rnd.choice(pool))
     rnd.shuffle(picked_archs)
 
-    # 2. 按四大象限分层抽取 5 种艺术流派（强制配额：2 个纯粹抽象/几何非欧 + 1 个超现实/阈限 + 1 个科幻奇观 + 1 个建筑/风格化光影）
-    def _pick_from_quadrant(quad_name, k):
+    # 2. 从 6 大美学家族中抽取 5 个不同家族，每个家族选 1 种流派，确保广谱多样性而不偏科
+    mov_families = list(dict.fromkeys(m.get("family", "other") for m in ART_MOVEMENTS))
+    rnd.shuffle(mov_families)
+    picked_movs = []
+    for fam in mov_families[:5]:
         fresh = [
             m for m in ART_MOVEMENTS
-            if m.get("quadrant") == quad_name and m["id"] not in recent_movs and m["name"] not in recent_movs
-        ]
-        if len(fresh) < k:
-            fresh = [m for m in ART_MOVEMENTS if m.get("quadrant") == quad_name]
-        return rnd.sample(fresh, min(k, len(fresh)))
-
-    picked_movs = (
-        _pick_from_quadrant("abstract", 2)
-        + _pick_from_quadrant("surreal_liminal", 1)
-        + _pick_from_quadrant("scifi_spectacle", 1)
-        + _pick_from_quadrant("architectural_stylized", 1)
-    )
+            if m.get("family") == fam and m["id"] not in recent_movs and m["name"] not in recent_movs
+        ] or [m for m in ART_MOVEMENTS if m.get("family") == fam]
+        if fresh:
+            picked_movs.append(rnd.choice(fresh))
     rnd.shuffle(picked_movs)
 
     return {
-        "suggested_archetypes": picked_archs,
+        "suggested_archetypes": [{k: v for k, v in a.items() if k != "builder_hint"} for a in picked_archs],
         "suggested_movements": picked_movs,
-        "quadrant_quota_rule": "向用户提供 4~5 个候选画面点子时，必须严格遵守四象限配额：至少 1~2 个必须是彻底脱离现实地景的【纯粹抽象 / 意识维度 / 几何构成 / 非欧视错觉】画面，严禁 5 个点子全部偏向具象现实场景！",
-        "usage_note": "以上为本轮随机抽取的发散跳板（严禁照抄原词），向用户提问时请用连贯舒展的自然口语描述，切忌用逗号、顿号或斜杠切碎成密集的四字词碎片",
+        "guidance_scope": (
+            "仅在用户还没想好要画什么、主动要求“提供场景灵感”时作为跨流派参考跳板使用。"
+            "只要用户已提出自己的主题、意象、时代情绪或具体画面描述，必须优先贴合用户意象的真实审美语境自由构思，"
+            "严禁拿无关的随机种子或历史高分流派强行覆盖用户意图！"
+        ),
+        "usage_note": (
+            "请用连贯自然的日常语言现场自由改写，严禁照抄原词；建模时优先用原创 bmesh/CURVE 与 CC0 资产塑造契合主题的三维结构，"
+            "切勿把某类特定模板或构件当成万能配方跨风格硬塞"
+        ),
     }
 
 
-def get_preference_hints(profile=None, seed=None):
-    """提问前调用，返回历史高分偏好、低分避雷、沟通模式倾向与本轮动态抽取的广谱空间/流派种子。"""
+def get_preference_hints(profile=None, seed=None, include_inspirations=True):
+    """
+    提问前调用，返回历史高分偏好、低分避雷、沟通模式倾向。
+    - include_inspirations=True（默认，兼容直接 Python 调用）：附带 divergent_suggestions 跨流派灵感跳板；
+    - include_inspirations=False（CLI `--hints` 模式）：仅输出用户历史偏好，不预注入随机场景种子，避免 Turn 1 污染用户意图。
+    """
     profile = profile or load_profile()
     stats = profile["history_stats"]
     mc = stats.get("mode_counts", {})
@@ -594,8 +647,15 @@ def get_preference_hints(profile=None, seed=None):
         "avoid": {},
         "recent_scenes": stats.get("recent_scenes", [])[-10:],
         "warmth_affinity": round(profile["aesthetic_weights"].get("warmth_affinity", 0.0), 2),
-        "divergent_suggestions": sample_divergent_directions(profile, seed=seed),
     }
+    if include_inspirations:
+        hints["divergent_suggestions"] = sample_divergent_directions(profile, seed=seed)
+    else:
+        hints["inspiration_note"] = (
+            "当前仅返回用户历史偏好，未附带随机场景种子。"
+            "只要用户已经给出主题、意象或大概画面，严禁再去拉取随机灵感种子；"
+            "仅当用户主动选择“先给我提供几个场景灵感挑一挑”（路径 ③）时，再执行 `python scripts/profile_manager.py --inspire`。"
+        )
     for category, options in profile.get("option_ratings", {}).items():
         label = CATEGORY_LABELS.get(category, category)
         for option, b in options.items():
@@ -641,7 +701,18 @@ flowchart LR
 
 
 if __name__ == "__main__":
-    if "--hints" in sys.argv:
-        print(json.dumps(get_preference_hints(), ensure_ascii=False, indent=2))
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+    args = set(sys.argv[1:])
+    if "--hints" in args and "--inspire" in args:
+        print(json.dumps(get_preference_hints(include_inspirations=True), ensure_ascii=False, indent=2))
+    elif "--hints" in args:
+        print(json.dumps(get_preference_hints(include_inspirations=False), ensure_ascii=False, indent=2))
+    elif "--inspire" in args:
+        print(json.dumps({"divergent_suggestions": sample_divergent_directions()}, ensure_ascii=False, indent=2))
     else:
-        print("用法: python scripts/profile_manager.py --hints")
+        print("用法: python scripts/profile_manager.py --hints | --inspire")

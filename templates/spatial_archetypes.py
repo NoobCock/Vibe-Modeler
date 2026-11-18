@@ -2,15 +2,17 @@
 templates/spatial_archetypes.py
 Vibe-Modeler 模块化三维空间骨架生成器
 
-为六大空间拓扑提供零穿模、法线干净、尺寸真实的底层三维结构积木，
-帮助空间能力较弱的模型先搭稳三维大空间，再自由组合细节、材质与资产：
+为多元艺术流派与空间拓扑提供零穿模、法线干净、尺寸真实的底层三维结构积木：
 1. build_enclosed_room：封闭室内 / 阈限大厅 / 池核空间（支持真门窗开洞、藻井格栅顶、柱列，自动标记天花板供全景图透视）
-2. build_vertical_atrium：多层垂直中庭 / 回廊楼梯深井（自动生成叠层回廊、跨层斜梯、护栏与立柱）
-3. build_canyon_corridor：两侧夹峙建筑峡谷 / 粗野主义巨构柱廊（阵列肋柱、可选拱券连廊与尽头高耸塔碑）
-4. build_spiral_stair_ribbon / build_orbital_ribbons / build_suspended_shards：超现实失重旋梯、贯穿太空弧环、悬浮碎片场
-5. build_impossible_stair_loop / build_gravity_flip_room：非欧几里得视错觉彭罗斯阶梯、多向重力翻转房间
-6. build_window_frame_stage：近景窗框与半透微风纱帘框景台
-7. build_endless_ground / build_grounded_backdrop_ridge / create_volumetric_light_beam：无方边穿帮大圆地面、底座深扎地下的不漏底远山、有界体积光束
+2. build_arched_colonnade：真圆弧拱券柱廊（柱础、圆柱、柱头、实体拱腹与檐梁，适用古典庭院、美术馆与海滨长廊）
+3. build_vertical_atrium：多层垂直中庭 / 回廊楼梯深井（自动生成叠层回廊、跨层斜梯、护栏与立柱）
+4. build_canyon_corridor：两侧夹峙建筑峡谷 / 粗野主义巨构柱廊
+5. build_window_frame_stage：近景窗框与半透微风纱帘框景台
+6. build_endless_ground / build_grounded_backdrop_ridge / create_volumetric_light_beam：无切角地平线基底、实底远山与有界体积光
+7. build_swept_ribbon_bridge / build_terraced_water_plaza / build_curved_glass_pavilion / setup_daylight_sky_world：流线天桥、多级水景广场、曲面玻璃温室与晴朗日光天穹（按题材选用）
+8. build_spiral_stair_ribbon / build_orbital_ribbons / build_suspended_shards：超现实失重旋梯、倾斜轨道丝带环、悬浮碎片场
+9. build_impossible_stair_loop / build_gravity_flip_room：非欧几里得视错觉彭罗斯阶梯、多向重力翻转房间
+10. setup_aerial_perspective_world / build_procedural_cloud_deck / build_megastructure_horizon / build_holographic_data_matrix / build_inverted_sky_megacity：大气云穹、远景天际线巨构、全息阵列与倒悬都市（按题材选用）
 """
 
 SPATIAL_ARCHETYPE_SNIPPETS = {
@@ -390,7 +392,7 @@ def build_orbital_ribbons(
     seed=0,
     mat=None,
 ):
-    '''构建超现实/神圣几何空间里的巨大倾斜交错光环或金属丝带环（参考倒悬钢琴/巨塔光环意象）。'''
+    '''构建超现实或几何空间里的倾斜交错丝带环/轨道环（注意：仅在星象、超现实或科幻题材按需使用，切勿无故塞入日常/自然/写实建筑场景）。'''
     import math as _m, random as _r
     rnd = _r.Random(seed)
     root = bpy.data.objects.new(name, None)
@@ -624,8 +626,8 @@ def build_window_frame_stage(
     curtain_mat=None,
 ):
     '''
-    构建近景窗框 + 宽窗台 + 微风吹拂半透明前景纱帘（参考清透夏日海景窗台框景）。
-    相机放在 (0, -1.6~-2.4, sill_z + 0.55) 朝 +Y 拍摄，透过两侧纱帘看到窗台小物件与窗外海天。
+    构建近景窗框 + 宽窗台 + 微风吹拂半透明前景纱帘框景台。
+    相机放在 (0, -1.6~-2.4, sill_z + 0.55) 朝 +Y 拍摄，透过两侧纱帘看到窗台小物件与窗外远景。
     '''
     import math as _m
     root = bpy.data.objects.new(name, None)
@@ -863,12 +865,12 @@ def build_megastructure_horizon(
     seed=10,
 ):
     '''
-    构建“真实下的科幻”（参考 imageref3 bg013 / images.jpg / 20211026）远景百米级巨型科幻构筑物群。
-    位于 Y = 120m ~ 300m 远方天际线，底座深扎地下 Z = -8.0m 绝不悬空漏底（hovering_ovoid_ship 除外，自动标记 vm_allow_float）。
+    构建远景百米级大型城市/科幻构筑物天际线（位于 Y = 120m ~ 300m 远方天际线，底座深扎地下 Z = -8.0m）。
     style 可选:
-      - "brutalist_fortress": 阶梯内倾巨型装甲要塞 + 悬挑飞扶壁肋梁 + 表面高频工业 Greeble 凸起与舷窗微光
-      - "orbital_spire": 拔地而起的轨道电梯巨塔 + 多层环形停泊船坞平台 + 顶部高耸天线阵列
-      - "hovering_ovoid_ship": 静默悬浮于湖面/山谷上空的哑光白/深灰巨型椭圆母舰（带机械进气槽缝与底舱微光）
+      - "brutalist_fortress": 阶梯内倾装甲要塞 + 悬挑飞扶壁肋梁 + 表面工业细节与舷窗微光
+      - "orbital_spire": 拔地而起的轨道高塔 + 多层停泊平台 + 顶部天线阵列
+      - "hovering_ovoid_ship": 悬浮于空中的哑光椭圆飞行器/母舰（带进气槽缝与底舱微光）
+      - "sleek_biomorphic_towers": 流畅弧面玻璃与生态露台摩天塔群（适合阳光生态未来、Frutiger Aero、现代主义天际线）
     '''
     import bmesh
     import math as _m, random as _r
@@ -916,6 +918,68 @@ def build_megastructure_horizon(
                 if gmat:
                     _vm_arch_box(f"{name}_SlotGlow_{i}_{band_z:.1f}", (cx, cy - rad * 0.62, cz + band_z),
                                  (rad * 0.72, 0.12, rad * 0.025), mat=gmat, bevel_width=0.01, parent=root, allow_float=True)
+        bpy.context.view_layer.update()
+        return root
+
+    if st == "sleek_biomorphic_towers":
+        # 流畅曲线玻璃与生态露台摩天塔群（底座深扎地下 Z = -8.0m）
+        sink_z = -8.0
+        n_t = max(1, int(tower_count))
+        for i in range(n_t):
+            ux = (i / float(n_t - 1) - 0.5) if n_t > 1 else 0.0
+            is_hero = (i == n_t // 2)
+            tx = ux * span_x * 0.68 + (6.5 if is_hero and n_t % 2 == 1 else rnd.uniform(-9.0, 9.0))
+            ty = distance_y + (0.0 if is_hero else abs(ux) * 28.0 + rnd.uniform(-6.0, 12.0))
+            th = base_height * (1.12 if is_hero else rnd.uniform(0.58, 0.88))
+            rad_base = th * rnd.uniform(0.065, 0.095)
+            segs_z = 22
+            segs_r = 36
+            me = bpy.data.meshes.new(f"{name}_BioTowerMesh_{i}")
+            bm = bmesh.new()
+            rings = []
+            for iz in range(segs_z + 1):
+                fz = iz / float(segs_z)
+                z = sink_z + (th - sink_z) * fz
+                taper = (1.0 - 0.72 * (fz ** 1.15)) * (1.0 + 0.06 * _m.sin(fz * _m.pi * 2.0))
+                twist = fz * 0.42 * (1.0 if i % 2 == 0 else -1.0)
+                row = []
+                for ir in range(segs_r):
+                    ang = (ir / float(segs_r)) * _m.tau + twist
+                    rx = rad_base * taper * (1.15 + 0.06 * _m.cos(ang * 2.0))
+                    ry = rad_base * taper * 0.82
+                    row.append(bm.verts.new((tx + rx * _m.cos(ang), ty + ry * _m.sin(ang), z)))
+                rings.append(row)
+            for iz in range(segs_z):
+                for ir in range(segs_r):
+                    ir_n = (ir + 1) % segs_r
+                    bm.faces.new((rings[iz][ir], rings[iz][ir_n], rings[iz + 1][ir_n], rings[iz + 1][ir]))
+            bm.faces.new(rings[-1])
+            bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+            bm.to_mesh(me)
+            bm.free()
+            for p in me.polygons:
+                p.use_smooth = True
+            ob = bpy.data.objects.new(f"{name}_BioTower_{i}", me)
+            bpy.context.collection.objects.link(ob)
+            ob.parent = root
+            if hmat:
+                ob.data.materials.append(hmat)
+            # 悬挑弧形生态观景露台环带（纤薄流线檐口，避免厚重圆柱环）
+            for deck_f in (0.34, 0.60, 0.80):
+                dz = th * deck_f
+                dr = rad_base * (1.0 - 0.72 * (deck_f ** 1.15)) * 1.18
+                bpy.ops.mesh.primitive_cylinder_add(vertices=40, radius=dr, depth=max(0.28, th * 0.009), location=(tx, ty, dz))
+                dk = bpy.context.object
+                dk.name = f"{name}_SkyDeck_{i}_{int(deck_f*100)}"
+                dk.scale = (1.18, 0.86, 1.0)
+                bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+                for p in dk.data.polygons:
+                    p.use_smooth = True
+                add_bevel(dk, width=0.06, segments=2)
+                dk.parent = root
+                dk["vm_allow_float"] = True
+                if rmat:
+                    dk.data.materials.append(rmat)
         bpy.context.view_layer.update()
         return root
 
@@ -1033,9 +1097,7 @@ def build_holographic_data_matrix(
     seed=21,
 ):
     '''
-    构建“真实下的科幻”全息数据矩阵与天体线框罩（参考 imageref3 bg014a / Wbg6 / Act1bg）。
-    自动创建程序化镂空电路/刻度纹理的半透明青蓝/琥珀全息 HUD 屏幕阵列（绝非死板实心色块），
-    可选开启 add_sky_wireframe_dome 在天穹生成巨型六边形/经纬线天体星盘线框网格罩。
+    构建半透明全息数据屏幕阵列与可选天体线框罩（仅适用于赛博/全息控制室/数字矩阵等对应题材）。
     '''
     import math as _m, random as _r
     rnd = _r.Random(seed)
@@ -1130,8 +1192,7 @@ def build_inverted_sky_megacity(
     seed=33,
 ):
     '''
-    构建天穹倒悬大都会 / 倒置金字塔奇观（参考 imageref3 5aee37 / BG_epilogue / v2-ad53）。
-    在 Z = ceiling_z 的高空倒挂密集的高低错落建筑群与跨天引桥，可选中央贯通天地巨塔或倒置黑曜石金字塔。
+    构建天穹倒悬城市 / 倒置重力建筑奇观（仅适用于重力倒转、折叠都市等超现实/科幻题材）。
     '''
     import math as _m, random as _r
     rnd = _r.Random(seed)
@@ -1283,10 +1344,7 @@ def setup_aerial_perspective_world(
     ambient_strength=0.45,
 ):
     '''
-    构建宏大场景与“真实下的科幻”专用双路径（Light Path）大气透视天空与体积云穹着色器：
-    1. 相机直接看到的背景呈现高反差层积风暴云海与可选行星级弯曲弧面地平线（参考 imageref3 32a3 / sterile_organ_canyon_v2），彻底杜绝画面顶部死黑虚空；
-    2. 场景漫反射照明走柔和环境光路径，不过曝不抢主光；
-    3. 自动配置 Blender Mist 雾气通道起点与深度，配合远景巨构立即产生百米级空气透视（Aerial Perspective）纵深感。
+    构建多层次大气透视天空与体积云穹着色器（注意：默认偏冷调阴云；若是晴朗日光场景请调用 setup_daylight_sky_world）。
     '''
     scene = bpy.context.scene
     if hasattr(scene.world, "mist_settings"):
@@ -1354,5 +1412,667 @@ def setup_aerial_perspective_world(
     nt.links.new(bg_cam.outputs["Background"], mix_bg.inputs[2])
     nt.links.new(mix_bg.outputs["Shader"], out.inputs["Surface"])
     return world
+""",
+
+    "biomorphic_and_daylight_builders": """
+def setup_daylight_sky_world(
+    sky_zenith=(0.05, 0.25, 0.78),
+    sky_horizon=(0.36, 0.68, 0.96),
+    cloud_color=(0.98, 0.99, 1.0),
+    cloud_coverage=0.45,
+    sun_elevation_deg=38.0,
+    sun_azimuth_deg=-35.0,
+    sun_energy=4.6,
+    sun_color=(1.0, 0.96, 0.88),
+    mist_start=35.0,
+    mist_depth=220.0,
+    ambient_strength=0.38,
+    add_sun_light=True,
+):
+    '''
+    构建清澈明亮的晴空日光世界着色器（含轻柔积云纹理、柔和环境散射与可选日光主光源）。
+    适用于晴朗自然地景、Frutiger Aero 生态未来、Solarpunk、现代玻璃建筑、阳光庭院等一切明快日光题材。
+    '''
+    import math as _m
+    scene = bpy.context.scene
+    if hasattr(scene.world, "mist_settings"):
+        scene.world.mist_settings.use_mist = True
+        scene.world.mist_settings.start = float(mist_start)
+        scene.world.mist_settings.depth = float(mist_depth)
+        scene.world.mist_settings.falloff = 'QUADRATIC'
+
+    world = scene.world or bpy.data.worlds.new("VM_DaylightWorld")
+    scene.world = world
+    world.use_nodes = True
+    nt = world.node_tree
+    nt.nodes.clear()
+
+    out = nt.nodes.new("ShaderNodeOutputWorld")
+    lp = nt.nodes.new("ShaderNodeLightPath")
+    mix_bg = nt.nodes.new("ShaderNodeMixShader")
+
+    bg_illum = nt.nodes.new("ShaderNodeBackground")
+    bg_illum.inputs["Color"].default_value = (
+        sky_horizon[0] * 0.72 + sky_zenith[0] * 0.28,
+        sky_horizon[1] * 0.72 + sky_zenith[1] * 0.28,
+        sky_horizon[2] * 0.72 + sky_zenith[2] * 0.28,
+        1.0,
+    )
+    bg_illum.inputs["Strength"].default_value = float(ambient_strength)
+
+    bg_cam = nt.nodes.new("ShaderNodeBackground")
+    bg_cam.inputs["Strength"].default_value = 1.10
+
+    coord = nt.nodes.new("ShaderNodeTexCoord")
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    sky_ramp = nt.nodes.new("ShaderNodeValToRGB")
+    sky_ramp.color_ramp.elements[0].position = 0.0
+    sky_ramp.color_ramp.elements[0].color = (sky_horizon[0], sky_horizon[1], sky_horizon[2], 1.0)
+    sky_ramp.color_ramp.elements[1].position = 0.42
+    sky_ramp.color_ramp.elements[1].color = (sky_zenith[0], sky_zenith[1], sky_zenith[2], 1.0)
+
+    mapping = nt.nodes.new("ShaderNodeMapping")
+    mapping.inputs["Scale"].default_value = (1.6, 1.6, 6.8)
+    noise = nt.nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = 3.6
+    noise.inputs["Detail"].default_value = 7.0
+    noise.inputs["Roughness"].default_value = 0.56
+
+    cloud_ramp = nt.nodes.new("ShaderNodeValToRGB")
+    cov = max(0.05, min(0.95, float(cloud_coverage)))
+    c_start = max(0.25, 0.78 - cov * 0.48)
+    c_end = min(0.96, c_start + 0.22)
+    cloud_ramp.color_ramp.elements[0].position = c_start
+    cloud_ramp.color_ramp.elements[0].color = (0.0, 0.0, 0.0, 1.0)
+    cloud_ramp.color_ramp.elements[1].position = c_end
+    cloud_ramp.color_ramp.elements[1].color = (0.85, 0.85, 0.85, 1.0)
+
+    # 地平线以下抑制云朵干扰地面反射
+    elev_ramp = nt.nodes.new("ShaderNodeValToRGB")
+    elev_ramp.color_ramp.elements[0].position = 0.03
+    elev_ramp.color_ramp.elements[0].color = (0.0, 0.0, 0.0, 1.0)
+    elev_ramp.color_ramp.elements[1].position = 0.16
+    elev_ramp.color_ramp.elements[1].color = (1.0, 1.0, 1.0, 1.0)
+
+    mul_cloud = nt.nodes.new("ShaderNodeMath")
+    mul_cloud.operation = 'MULTIPLY'
+
+    mix_col = nt.nodes.new("ShaderNodeMix")
+    mix_col.data_type = 'RGBA'
+    mix_col.blend_type = 'MIX'
+    mix_col.inputs[7].default_value = (cloud_color[0], cloud_color[1], cloud_color[2], 1.0)
+
+    nt.links.new(coord.outputs["Generated"], sep.inputs["Vector"])
+    nt.links.new(sep.outputs["Z"], sky_ramp.inputs["Fac"])
+    nt.links.new(sep.outputs["Z"], elev_ramp.inputs["Fac"])
+    nt.links.new(coord.outputs["Generated"], mapping.inputs["Vector"])
+    nt.links.new(mapping.outputs["Vector"], noise.inputs["Vector"])
+    nt.links.new(noise.outputs["Fac"], cloud_ramp.inputs["Fac"])
+    nt.links.new(cloud_ramp.outputs["Color"], mul_cloud.inputs[0])
+    nt.links.new(elev_ramp.outputs["Color"], mul_cloud.inputs[1])
+    nt.links.new(mul_cloud.outputs[0], mix_col.inputs[0])
+    nt.links.new(sky_ramp.outputs["Color"], mix_col.inputs[6])
+    nt.links.new(mix_col.outputs[2], bg_cam.inputs["Color"])
+
+    nt.links.new(lp.outputs["Is Camera Ray"], mix_bg.inputs["Fac"])
+    nt.links.new(bg_illum.outputs["Background"], mix_bg.inputs[1])
+    nt.links.new(bg_cam.outputs["Background"], mix_bg.inputs[2])
+    nt.links.new(mix_bg.outputs["Shader"], out.inputs["Surface"])
+
+    if add_sun_light:
+        sdata = bpy.data.lights.new("Daylight_Sun", 'SUN')
+        sdata.energy = float(sun_energy)
+        sdata.color = sun_color[:3]
+        sdata.angle = _m.radians(2.2)
+        sobj = bpy.data.objects.new("Daylight_Sun", sdata)
+        bpy.context.collection.objects.link(sobj)
+        sobj.rotation_euler = (
+            _m.radians(90.0 - float(sun_elevation_deg)),
+            0.0,
+            _m.radians(float(sun_azimuth_deg)),
+        )
+    return world
+
+def build_curved_glass_pavilion(
+    name="CurvedGlassPavilion",
+    width=16.0,
+    length=26.0,
+    arch_height=9.5,
+    bay_count=7,
+    add_mezzanine=True,
+    mezzanine_levels=2,
+    add_water_basin=False,
+    mat_frame=None,
+    mat_glass=None,
+    mat_floor=None,
+    mat_water=None,
+    mat_rail=None,
+):
+    '''
+    构建流线型拱顶玻璃展馆 / 生态温室 / 明亮现代中庭骨架（原点位于中心地面，相机建议放于 Y 负半轴朝 +Y 纵深拍摄）。
+    生成平滑抛物线拱肋、横向檩条、半透明曲面玻璃采光顶（自动标 vm_is_ceiling=True 供全景图透视）、
+    可选两侧弧形挑空夹层回廊与透明护栏，以及可选中央镜面浅水池。
+    '''
+    import bmesh
+    import math as _m
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+
+    fmat = mat_frame
+    if fmat is None:
+        fmat = bpy.data.materials.new(f"{name}_FrameWhite")
+        fmat.use_nodes = True
+        bsdf = fmat.node_tree.nodes.get("Principled BSDF")
+        if bsdf:
+            bsdf.inputs["Base Color"].default_value = (0.94, 0.96, 0.98, 1.0)
+            bsdf.inputs["Roughness"].default_value = 0.24
+
+    gmat = mat_glass
+    if gmat is None:
+        gmat = bpy.data.materials.new(f"{name}_SkyGlass")
+        gmat.use_nodes = True
+        nt = gmat.node_tree
+        nt.nodes.clear()
+        out_n = nt.nodes.new("ShaderNodeOutputMaterial")
+        lp_n = nt.nodes.new("ShaderNodeLightPath")
+        lw_n = nt.nodes.new("ShaderNodeLayerWeight")
+        lw_n.inputs["Blend"].default_value = 0.35
+        map_r = nt.nodes.new("ShaderNodeMapRange")
+        map_r.clamp = True
+        map_r.inputs["From Min"].default_value = 0.0
+        map_r.inputs["From Max"].default_value = 1.0
+        map_r.inputs["To Min"].default_value = 0.08
+        map_r.inputs["To Max"].default_value = 0.32
+        trans_n = nt.nodes.new("ShaderNodeBsdfTransparent")
+        trans_n.inputs["Color"].default_value = (0.82, 0.95, 1.0, 1.0)
+        gloss_n = nt.nodes.new("ShaderNodeBsdfGlossy")
+        gloss_n.inputs["Color"].default_value = (0.88, 0.98, 1.0, 1.0)
+        gloss_n.inputs["Roughness"].default_value = 0.04
+        mix_vis = nt.nodes.new("ShaderNodeMixShader")
+        nt.links.new(lw_n.outputs["Facing"], map_r.inputs["Value"])
+        nt.links.new(map_r.outputs["Result"], mix_vis.inputs["Fac"])
+        nt.links.new(trans_n.outputs["BSDF"], mix_vis.inputs[1])
+        nt.links.new(gloss_n.outputs["BSDF"], mix_vis.inputs[2])
+        shadow_trans = nt.nodes.new("ShaderNodeBsdfTransparent")
+        shadow_trans.inputs["Color"].default_value = (0.95, 0.99, 1.0, 1.0)
+        mix_sh = nt.nodes.new("ShaderNodeMixShader")
+        nt.links.new(lp_n.outputs["Is Shadow Ray"], mix_sh.inputs["Fac"])
+        nt.links.new(mix_vis.outputs["Shader"], mix_sh.inputs[1])
+        nt.links.new(shadow_trans.outputs["BSDF"], mix_sh.inputs[2])
+        nt.links.new(mix_sh.outputs["Shader"], out_n.inputs["Surface"])
+        if hasattr(gmat, "surface_render_method"):
+            gmat.surface_render_method = 'BLENDED'
+        elif hasattr(gmat, "blend_method"):
+            gmat.blend_method = 'BLEND'
+
+    rmat = mat_rail or gmat
+    fl_mat = mat_floor or fmat
+    hw = width * 0.5
+    hl = length * 0.5
+
+    # 1. 平滑铺地台座（底面深扎 -0.25m 防漏底，顶面微抬 +0.18m 防草地穿模）
+    _vm_arch_box(f"{name}_Floor", (0.0, 0.0, -0.03), (width + 1.2, length + 1.2, 0.44), mat=fl_mat, bevel_width=0.02, parent=root)
+
+    # 2. 抛物线拱形结构主肋（BMesh 矩形截面扫掠，底端深嵌入底座 Z=-0.06m 严密接地）
+    arch_segs = 32
+    rib_w = max(0.18, width * 0.016)
+    rib_d = max(0.24, length / max(1, bay_count) * 0.09)
+    n_bays = max(2, int(bay_count))
+
+    def _arch_point(u):
+        # u in [-1, 1] -> x, z along parabolic arch anchored cleanly into floor slab
+        x = u * hw
+        z = (arch_height + 0.06) * (1.0 - (u ** 2)) - 0.06
+        return x, z
+
+    for bi in range(n_bays + 1):
+        by = -hl + (length / float(n_bays)) * bi
+        me = bpy.data.meshes.new(f"{name}_ArchRibMesh_{bi}")
+        bm = bmesh.new()
+        rings = []
+        for si in range(arch_segs + 1):
+            u = -1.0 + 2.0 * (si / float(arch_segs))
+            ax, az = _arch_point(u)
+            # 法向近似：向外偏移 rib_w
+            dx = hw
+            dz = -2.0 * (arch_height + 0.06) * u
+            nlen = max(1e-4, _m.hypot(dx, dz))
+            nx, nz = -dz / nlen, dx / nlen
+            if nz < 0 and abs(u) < 0.5:
+                nx, nz = -nx, -nz
+            p_in = (ax - nx * rib_w * 0.5, az - nz * rib_w * 0.5)
+            p_out = (ax + nx * rib_w * 0.5, az + nz * rib_w * 0.5)
+            rings.append([
+                bm.verts.new((p_in[0], by - rib_d * 0.5, p_in[1])),
+                bm.verts.new((p_out[0], by - rib_d * 0.5, p_out[1])),
+                bm.verts.new((p_out[0], by + rib_d * 0.5, p_out[1])),
+                bm.verts.new((p_in[0], by + rib_d * 0.5, p_in[1])),
+            ])
+        for si in range(arch_segs):
+            r0, r1 = rings[si], rings[si + 1]
+            for k in range(4):
+                kn = (k + 1) % 4
+                bm.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
+        bm.faces.new(list(reversed(rings[0])))
+        bm.faces.new(rings[-1])
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(me)
+        bm.free()
+        for p in me.polygons:
+            p.use_smooth = True
+        rib = bpy.data.objects.new(f"{name}_ArchRib_{bi}", me)
+        bpy.context.collection.objects.link(rib)
+        rib.parent = root
+        rib.data.materials.append(fmat)
+
+    # 3. 纵向结构檩条 + 曲面玻璃采光穹顶（自动标 vm_is_ceiling）
+    for pu in (-0.82, -0.52, -0.24, 0.0, 0.24, 0.52, 0.82):
+        px, pz = _arch_point(pu)
+        purlin = _vm_arch_box(f"{name}_Purlin_{pu:.2f}", (px, 0.0, pz), (0.10, length + 0.1, 0.12),
+                              mat=fmat, bevel_width=0.008, parent=root, allow_float=True)
+        purlin["vm_is_ceiling"] = True
+
+    canopy_me = bpy.data.meshes.new(f"{name}_GlassCanopyMesh")
+    bm = bmesh.new()
+    canopy_rows = []
+    for si in range(arch_segs + 1):
+        u = -1.0 + 2.0 * (si / float(arch_segs))
+        ax, az = _arch_point(u)
+        canopy_rows.append((
+            bm.verts.new((ax, -hl, az + 0.03)),
+            bm.verts.new((ax, hl, az + 0.03)),
+        ))
+    for si in range(arch_segs):
+        a0, b0 = canopy_rows[si]
+        a1, b1 = canopy_rows[si + 1]
+        bm.faces.new((a0, b0, b1, a1))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(canopy_me)
+    bm.free()
+    for p in canopy_me.polygons:
+        p.use_smooth = True
+    canopy = bpy.data.objects.new(f"{name}_GlassCanopy", canopy_me)
+    bpy.context.collection.objects.link(canopy)
+    canopy.parent = root
+    canopy["vm_is_ceiling"] = True
+    canopy["vm_allow_float"] = True
+    add_solidify(canopy, thickness=0.035)
+    canopy.data.materials.append(gmat)
+
+    # 4. 可选两侧多层挑空弧边夹层走廊与玻璃栏杆（严格贴合抛物线拱顶内壁，绝不穿出屋面）
+    if add_mezzanine and mezzanine_levels > 0:
+        lv_h = min(2.9, arch_height * 0.27)
+        for lv in range(1, int(mezzanine_levels) + 1):
+            mz = lv * lv_h
+            if mz >= arch_height * 0.66:
+                continue
+            u_arch = _m.sqrt(max(0.04, 1.0 - (mz + 0.40) / float(arch_height + 0.06)))
+            outer_x = hw * u_arch * 0.96
+            deck_w = min(max(1.4, width * 0.17), outer_x * 0.42)
+            if deck_w < 1.1:
+                continue
+            for side, tag in ((-1.0, "L"), (1.0, "R")):
+                dx = side * (outer_x - deck_w * 0.5)
+                inner_x = side * (outer_x - deck_w + 0.08)
+                _vm_arch_box(f"{name}_MezzDeck_{tag}_L{lv}", (dx, 0.0, mz - 0.10),
+                             (deck_w, length * 0.94, 0.20), mat=fmat, bevel_width=0.02, parent=root, allow_float=True)
+                # 玻璃栏板 + 顶部扶手
+                _vm_arch_box(f"{name}_MezzGlassRail_{tag}_L{lv}", (inner_x, 0.0, mz + 0.48),
+                             (0.03, length * 0.94, 0.92), mat=rmat, bevel_width=0.005, parent=root, allow_float=True)
+                _vm_arch_box(f"{name}_MezzHandrail_{tag}_L{lv}", (inner_x, 0.0, mz + 0.96),
+                             (0.06, length * 0.94, 0.05), mat=fmat, bevel_width=0.008, parent=root, allow_float=True)
+                # 支撑细圆柱（严丝合缝插到底座和夹层底面，不凸出到玻璃栏板上）
+                n_cols = max(3, n_bays // 2)
+                for ci in range(n_cols + 1):
+                    cy = -hl * 0.85 + (length * 0.85) * (ci / float(n_cols))
+                    bpy.ops.mesh.primitive_cylinder_add(vertices=20, radius=0.11, depth=mz, location=(inner_x, cy, mz * 0.5))
+                    col = bpy.context.object
+                    col.name = f"{name}_MezzCol_{tag}_L{lv}_{ci}"
+                    for p in col.data.polygons:
+                        p.use_smooth = True
+                    col.parent = root
+                    col.data.materials.append(fmat)
+
+    # 5. 可选中央静水反射池（建在抬高地台顶面 Z=0.19m 之上）
+    if add_water_basin:
+        wmat = mat_water
+        if wmat is None:
+            wmat = bpy.data.materials.new(f"{name}_WaterSurface")
+            wmat.use_nodes = True
+            nt_w = wmat.node_tree
+            bsdf = nt_w.nodes.get("Principled BSDF")
+            if bsdf:
+                bsdf.inputs["Base Color"].default_value = (0.10, 0.52, 0.74, 1.0)
+                bsdf.inputs["Roughness"].default_value = 0.025
+                bsdf.inputs["IOR"].default_value = 1.333
+                if "Coat Weight" in bsdf.inputs:
+                    bsdf.inputs["Coat Weight"].default_value = 0.45
+                ns_w = nt_w.nodes.new("ShaderNodeTexNoise")
+                ns_w.inputs["Scale"].default_value = 18.0
+                ns_w.inputs["Detail"].default_value = 3.0
+                bp_w = nt_w.nodes.new("ShaderNodeBump")
+                bp_w.inputs["Strength"].default_value = 0.035
+                nt_w.links.new(ns_w.outputs["Fac"], bp_w.inputs["Height"])
+                nt_w.links.new(bp_w.outputs["Normal"], bsdf.inputs["Normal"])
+        pool_w = width * 0.36
+        pool_l = length * 0.66
+        _vm_arch_box(f"{name}_PoolCurbL", (-pool_w * 0.5, 0.0, 0.27), (0.18, pool_l, 0.16), mat=fmat, parent=root)
+        _vm_arch_box(f"{name}_PoolCurbR", (pool_w * 0.5, 0.0, 0.27), (0.18, pool_l, 0.16), mat=fmat, parent=root)
+        _vm_arch_box(f"{name}_PoolCurbF", (0.0, -pool_l * 0.5, 0.27), (pool_w + 0.18, 0.18, 0.16), mat=fmat, parent=root)
+        _vm_arch_box(f"{name}_PoolCurbB", (0.0, pool_l * 0.5, 0.27), (pool_w + 0.18, 0.18, 0.16), mat=fmat, parent=root)
+        _vm_arch_box(f"{name}_WaterPlane", (0.0, 0.0, 0.24), (pool_w - 0.20, pool_l - 0.20, 0.12), mat=wmat, bevel_width=0.0, parent=root)
+
+    bpy.context.view_layer.update()
+    return root
+
+def build_terraced_water_plaza(
+    name="TerracedWaterPlaza",
+    center=(0.0, 12.0, 0.0),
+    radius=15.0,
+    tiers=3,
+    tier_height=0.42,
+    add_water_basin=True,
+    add_planters=True,
+    mat_stone=None,
+    mat_trim=None,
+    mat_water=None,
+    mat_greenery=None,
+):
+    '''
+    构建平滑多级弧形露台水景广场（带叠级圆形/椭圆平台、中空环状压边檐口、镜面水池与外缘绿化种植槽）。
+    底座深扎地下，不会在贴地体检时发生浮空穿帮。
+    '''
+    import bmesh
+    import math as _m
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = center
+
+    def _make_elliptical_ring(obj_name, r_in, r_out, z_bot, z_top, segs=56, mat=None):
+        me = bpy.data.meshes.new(obj_name + "_Mesh")
+        bm = bmesh.new()
+        in_bot, out_bot, in_top, out_top = [], [], [], []
+        for si in range(segs):
+            ang = (si / float(segs)) * _m.tau
+            ca, sa = _m.cos(ang), _m.sin(ang)
+            in_bot.append(bm.verts.new((r_in * 1.15 * ca, r_in * 0.92 * sa, z_bot)))
+            out_bot.append(bm.verts.new((r_out * 1.15 * ca, r_out * 0.92 * sa, z_bot)))
+            in_top.append(bm.verts.new((r_in * 1.15 * ca, r_in * 0.92 * sa, z_top)))
+            out_top.append(bm.verts.new((r_out * 1.15 * ca, r_out * 0.92 * sa, z_top)))
+        for si in range(segs):
+            sn = (si + 1) % segs
+            bm.faces.new((in_top[si], out_top[si], out_top[sn], in_top[sn]))
+            bm.faces.new((out_bot[si], in_bot[si], in_bot[sn], out_bot[sn]))
+            bm.faces.new((out_bot[si], out_bot[sn], out_top[sn], out_top[si]))
+            bm.faces.new((in_top[si], in_top[sn], in_bot[sn], in_bot[si]))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(me)
+        bm.free()
+        for p in me.polygons:
+            p.use_smooth = True
+        ob = bpy.data.objects.new(obj_name, me)
+        bpy.context.collection.objects.link(ob)
+        ob.parent = root
+        add_bevel(ob, width=0.014, segments=2)
+        if mat:
+            ob.data.materials.append(mat)
+        return ob
+
+    smat = mat_stone
+    if smat is None:
+        smat = bpy.data.materials.new(f"{name}_WhiteStone")
+        smat.use_nodes = True
+        bsdf = smat.node_tree.nodes.get("Principled BSDF")
+        if bsdf:
+            bsdf.inputs["Base Color"].default_value = (0.92, 0.94, 0.96, 1.0)
+            bsdf.inputs["Roughness"].default_value = 0.28
+
+    tmat = mat_trim or smat
+    wmat = mat_water
+    if wmat is None and add_water_basin:
+        wmat = bpy.data.materials.new(f"{name}_PlazaWater")
+        wmat.use_nodes = True
+        nt_w = wmat.node_tree
+        bsdf = nt_w.nodes.get("Principled BSDF")
+        if bsdf:
+            bsdf.inputs["Base Color"].default_value = (0.12, 0.56, 0.78, 1.0)
+            bsdf.inputs["Roughness"].default_value = 0.025
+            bsdf.inputs["IOR"].default_value = 1.333
+            if "Coat Weight" in bsdf.inputs:
+                bsdf.inputs["Coat Weight"].default_value = 0.45
+            ns_w = nt_w.nodes.new("ShaderNodeTexNoise")
+            ns_w.inputs["Scale"].default_value = 16.0
+            ns_w.inputs["Detail"].default_value = 3.0
+            bp_w = nt_w.nodes.new("ShaderNodeBump")
+            bp_w.inputs["Strength"].default_value = 0.03
+            nt_w.links.new(ns_w.outputs["Fac"], bp_w.inputs["Height"])
+            nt_w.links.new(bp_w.outputs["Normal"], bsdf.inputs["Normal"])
+
+    gmat = mat_greenery
+    if gmat is None and add_planters:
+        gmat = bpy.data.materials.new(f"{name}_LawnGreen")
+        gmat.use_nodes = True
+        bsdf = gmat.node_tree.nodes.get("Principled BSDF")
+        if bsdf:
+            bsdf.inputs["Base Color"].default_value = (0.28, 0.64, 0.24, 1.0)
+            bsdf.inputs["Roughness"].default_value = 0.72
+
+    n_tiers = max(1, int(tiers))
+    for ti in range(n_tiers):
+        frac = ti / float(max(1, n_tiers))
+        r_cur = radius * (1.0 - frac * 0.45)
+        z_top = (ti + 1) * tier_height
+        z_bot = -0.06 if ti == 0 else ti * tier_height - 0.04
+        h_cur = z_top - z_bot
+        bpy.ops.mesh.primitive_cylinder_add(vertices=56, radius=r_cur, depth=h_cur, location=(0.0, 0.0, z_bot + h_cur * 0.5))
+        step = bpy.context.object
+        step.name = f"{name}_Tier_{ti}"
+        step.scale = (1.15, 0.92, 1.0)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        for p in step.data.polygons:
+            p.use_smooth = True
+        add_bevel(step, width=0.03, segments=2)
+        step.parent = root
+        step.data.materials.append(smat)
+
+        # 中空环状边缘高亮压边檐口（仅包覆台阶外沿 0.24m 宽，保留石材露台表面）
+        _make_elliptical_ring(
+            f"{name}_TierCoping_{ti}",
+            max(0.4, r_cur - 0.22),
+            r_cur + 0.05,
+            z_top - 0.06,
+            z_top + 0.015,
+            segs=56,
+            mat=tmat,
+        )
+
+    top_z = n_tiers * tier_height
+    if add_water_basin:
+        pool_r = radius * 0.42
+        # 中空池壁围框（高出水面，形成真实凹陷水池）
+        _make_elliptical_ring(
+            f"{name}_PoolCurb",
+            pool_r,
+            pool_r + 0.24,
+            top_z - 0.02,
+            top_z + 0.16,
+            segs=56,
+            mat=tmat,
+        )
+        bpy.ops.mesh.primitive_cylinder_add(vertices=48, radius=pool_r + 0.02, depth=0.09, location=(0.0, 0.0, top_z + 0.055))
+        wp = bpy.context.object
+        wp.name = f"{name}_WaterBasin"
+        wp.scale = (1.15, 0.92, 1.0)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        for p in wp.data.polygons:
+            p.use_smooth = True
+        wp.parent = root
+        wp.data.materials.append(wmat)
+
+    if add_planters:
+        # 置于首级露台外缘前侧：在任何 radius / tiers 下均确保内缘严密避开 Tier_1/TierCoping_1，同时锚固在 Tier_0 上
+        base_u_x, base_u_y = 0.92 / 1.15, -0.65 / 0.92
+        base_u = _m.hypot(base_u_x, base_u_y)
+        pod_r = max(0.35, radius * 0.135)
+        u_center = base_u
+        if n_tiers >= 2:
+            u_tier1_out = 1.0 - 0.45 / float(n_tiers) + 0.05 / float(max(0.5, radius))
+            req_min_u = u_tier1_out + 0.018
+            inward_norm = (1.25 / 1.15) * (pod_r / float(max(0.5, radius)))
+            if u_center - inward_norm < req_min_u:
+                if req_min_u + inward_norm > 1.14:
+                    pod_r = max(0.28, (1.14 - req_min_u) / (1.25 / 1.15) * float(radius))
+                    inward_norm = (1.25 / 1.15) * (pod_r / float(max(0.5, radius)))
+                u_center = max(base_u, req_min_u + inward_norm)
+        scale_u = u_center / base_u
+        for side, tag in ((-1.0, "L"), (1.0, "R")):
+            px = side * radius * 0.92 * scale_u
+            py = -radius * 0.65 * scale_u
+            pod_h = tier_height + 0.36
+            bpy.ops.mesh.primitive_cylinder_add(vertices=36, radius=pod_r, depth=pod_h + 0.06, location=(px, py, (pod_h - 0.06) * 0.5))
+            pod = bpy.context.object
+            pod.name = f"{name}_PlanterRim_{tag}"
+            pod.scale = (1.25, 0.78, 1.0)
+            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+            for p in pod.data.polygons:
+                p.use_smooth = True
+            add_bevel(pod, width=0.04, segments=2)
+            pod.parent = root
+            pod.data.materials.append(smat)
+
+            bpy.ops.mesh.primitive_cylinder_add(vertices=36, radius=pod_r * 0.84, depth=0.14, location=(px, py, pod_h - 0.03))
+            turf = bpy.context.object
+            turf.name = f"{name}_PlanterTurf_{tag}"
+            turf.scale = (1.23, 0.76, 1.0)
+            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+            for p in turf.data.polygons:
+                p.use_smooth = True
+            turf.parent = root
+            turf.data.materials.append(gmat)
+
+    bpy.context.view_layer.update()
+    return root
+
+def build_swept_ribbon_bridge(
+    name="SweptRibbonBridge",
+    start_pt=(-8.0, 4.0, 0.2),
+    mid_pt=(0.0, 10.0, 2.4),
+    end_pt=(8.0, 16.0, 0.2),
+    width=2.4,
+    thickness=0.22,
+    segments=32,
+    add_railings=True,
+    railing_height=1.02,
+    mat_deck=None,
+    mat_rail=None,
+    allow_float=False,
+):
+    '''
+    沿着起止与中点贝塞尔曲线平滑放样生成流线型弧形天桥 / 坡道 / 曲面挑檐（自动带两侧扶手与细柱）。
+    '''
+    import bmesh
+    from mathutils import Vector
+    span_allow_float = bool(allow_float or start_pt[2] > 0.25 or end_pt[2] > 0.25)
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    if span_allow_float:
+        root["vm_allow_float"] = True
+
+    p0 = Vector(start_pt)
+    p1 = Vector(mid_pt) * 2.0 - (Vector(start_pt) + Vector(end_pt)) * 0.5
+    p2 = Vector(end_pt)
+
+    def _bezier(t):
+        u = 1.0 - t
+        return p0 * (u * u) + p1 * (2.0 * u * t) + p2 * (t * t)
+
+    def _bezier_tan(t):
+        return ((p1 - p0) * (2.0 * (1.0 - t)) + (p2 - p1) * (2.0 * t)).normalized()
+
+    segs = max(8, int(segments))
+    hw = width * 0.5
+    ht = thickness * 0.5
+
+    me = bpy.data.meshes.new(f"{name}_DeckMesh")
+    bm = bmesh.new()
+    rings = []
+    centers = []
+    sides = []
+    for i in range(segs + 1):
+        t = i / float(segs)
+        c = _bezier(t)
+        tan = _bezier_tan(t)
+        side_v = tan.cross(Vector((0.0, 0.0, 1.0)))
+        if side_v.length < 1e-4:
+            side_v = Vector((1.0, 0.0, 0.0))
+        else:
+            side_v.normalize()
+        up_v = side_v.cross(tan).normalized()
+        centers.append(c)
+        sides.append(side_v)
+        rings.append([
+            bm.verts.new(c - side_v * hw - up_v * ht),
+            bm.verts.new(c + side_v * hw - up_v * ht),
+            bm.verts.new(c + side_v * hw + up_v * ht),
+            bm.verts.new(c - side_v * hw + up_v * ht),
+        ])
+    for i in range(segs):
+        r0, r1 = rings[i], rings[i + 1]
+        for k in range(4):
+            kn = (k + 1) % 4
+            bm.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
+    bm.faces.new(list(reversed(rings[0])))
+    bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+
+    deck = bpy.data.objects.new(f"{name}_Deck", me)
+    bpy.context.collection.objects.link(deck)
+    deck.parent = root
+    if span_allow_float:
+        deck["vm_allow_float"] = True
+    add_bevel(deck, width=min(0.02, thickness * 0.15), segments=2)
+    if mat_deck:
+        deck.data.materials.append(mat_deck)
+
+    if add_railings:
+        rmat = mat_rail or mat_deck
+        for side_sign, tag in ((-1.0, "L"), (1.0, "R")):
+            cdata = bpy.data.curves.new(f"{name}_RailCurve_{tag}", type='CURVE')
+            cdata.dimensions = '3D'
+            cdata.bevel_depth = 0.028
+            cdata.bevel_resolution = 4
+            if hasattr(cdata, "use_fill_caps"):
+                cdata.use_fill_caps = True
+            spline = cdata.splines.new('POLY')
+            spline.points.add(segs)
+            for i in range(segs + 1):
+                rp = centers[i] + sides[i] * (side_sign * (hw - 0.07)) + Vector((0.0, 0.0, ht + railing_height))
+                spline.points[i].co = (rp.x, rp.y, rp.z, 1.0)
+            rob = bpy.data.objects.new(f"{name}_Handrail_{tag}", cdata)
+            bpy.context.collection.objects.link(rob)
+            rob.parent = root
+            rob["vm_allow_float"] = True
+            if rmat:
+                rob.data.materials.append(rmat)
+
+            post_step = max(2, segs // 8)
+            for i in range(0, segs + 1, post_step):
+                bp = centers[i] + sides[i] * (side_sign * (hw - 0.07)) + Vector((0.0, 0.0, ht + railing_height * 0.5))
+                _vm_arch_box(
+                    f"{name}_Post_{tag}_{i}",
+                    (bp.x, bp.y, bp.z),
+                    (0.036, 0.036, railing_height),
+                    mat=rmat,
+                    bevel_width=0.004,
+                    parent=root,
+                    allow_float=True,
+                )
+
+    bpy.context.view_layer.update()
+    return root
 """,
 }

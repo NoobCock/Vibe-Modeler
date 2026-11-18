@@ -15,22 +15,22 @@ description: 通过双分支提问（孩童式简易模式或专业详细模式�
 > 本技能是一套**严格按状态机顺序执行的工程管线**，绝不是供你自由发挥的“灵感参考文档”！你**必须 100% 严格、完整、逐项照着本技能规定的 6 个阶段走完**，严禁以“为了效率”、“用户已经大概说了”、“我直接写个独立脚本更快”为借口跳过、合并或篡改任何一步！事后承认“我没有完整照着 Vibe-Modeler 的流程走”属于严重违约事故。
 
 ### 强制六步状态机（每一步未完成，绝对禁止进入下一步）
-1. **[状态 1：静默初始化]** → 必须先用命令工具执行 `python scripts/profile_manager.py --hints` 与 `python scripts/blender_finder.py --json`，拿到本轮发散种子和 Blender 路径后才能开口说话。
-2. **[状态 2：语气锁定 + 创作起点二选一（首要：用户自述场景 / 第二：提供场景灵感）]** → 必须调用宿主环境的**提问选择工具**（如 `ask_question` / `AskUserQuestion` / `request_user_input`）让用户同时选择：
-   - **问题 1**：“四档自定义语气”；
-   - **问题 2**：“创作起点选择”——**首要选项（第一项）是让用户描述自己想要的大概场景**，**第二选项是给用户提供场景灵感**。
-   - **当用户选择第二选项（提供场景灵感）时**，才进入原有的“给用户提供几个场景意象选择（4 个四象限灵感意象 + 1 个简易模式直白引导）”步骤；**当用户选择首要选项（或已直接写出大概场景）时**，直接顺着用户描述的场景进入分支补全追问，严禁再去抛无关的随机意象！
-3. **[状态 3：分支逐题交互（A 分支简易模式 / B 分支详细模式自适应追问）]** → 必须严格按照所选分支，**每一轮回应 1~2 句当前语气的话 + 立即调用提问选择工具弹出下一题**。严禁把所有问题压缩成纯文本一口气丢给用户，也严禁问了一半自己替用户脑补剩下的选项！
-4. **[状态 4：调用 `blender_runner.run_scene` 跑 `preview` + 6 维挑剔自审]** → **严禁自己写独立的 `bpy` 脚本直接用 `blender -b -P` 裸跑！** 必须且只能通过 `from scripts import blender_runner as br` 调用 `br.run_scene(env_code, mesh_code, camera_code, settings)`，先以 `"mode": "preview"` 生成 `preview.png`、`overview.png` 与 `report_preview.json`。必须用看图工具（`read_file` / 视觉读取）亲自查看 `preview.png` 与 `overview.png`，且 `preflight.issues` 必须为空（`ok == True`），有一项不达标必须在同一个 `output_dir` 里改代码重跑 `preview`！
-5. **[状态 5：跑 `final` 正式光追 + 二次审图 + `br.run_post_process` 合成器后期]** → 预览完全达标后，在同一个 `output_dir` 将 `mode` 设为 `"final"` 渲染 Cycles 大图并生成 `raw_cache.exr`。渲染完必须再次看图审视 `render.png`；若需要强化空气雾感、AO 接触阴影、泛光星芒、暗角或调色，必须调用 `br.run_post_process(output_dir, post_process=...)` 执行 Blender 合成器后处理，并用看图工具确认最终 `render.png`。
+1. **[状态 1：静默初始化]** → 必须先用命令工具执行 `python scripts/profile_manager.py --hints` 与 `python scripts/blender_finder.py --json`，拿到用户历史偏好（**不包含随机场景种子**）与 Blender 路径后才能开口说话。
+2. **[状态 2：语气锁定 + 创作起点 / 意象方向确认]** → 必须调用宿主环境的**提问选择工具**（如 `ask_question` / `AskUserQuestion` / `request_user_input`）完成开场确认：
+   - 若用户尚未写出具体想法（**情况 A**）：同时抛出 **问题 1**（四档自定义语气）与 **问题 2**（创作起点二选一：首要让用户自述场景 / 第二提供多元场景灵感）。
+   - 若用户首句话**已经写出了主题意象、情绪概念或具体画面**（**情况 B**）：不要再问“你想自己描述还是让我给灵感”，直接抛出 **问题 1**（四档自定义语气）+ **问题 2**（紧扣用户刚刚说出的意象做审美语境解码确认——若是诗意/文化概念，给出 3~4 个契合该主题文化语境的美学落点供拍板；若是具体空间与画风，直接补问第一个未定维度），**严禁调 `--inspire` 抛无关随机种子或盲跳过方向确认！**
+3. **[状态 3：分支逐题交互（A 分支简易模式 / B 分支详细模式自适应追问）]** → 必须严格按照所选分支与已确认项，**每一轮回应 1~2 句当前语气的话 + 立即调用提问选择工具弹出下一题**（跳过前面已拍板的维度，只补问未定维度；若只剩 1~3 个未定维度就只问这 1~3 轮，严禁凑满 4 轮）。严禁把所有问题压缩成纯文本一口气丢给用户，也严禁问了一半自己替用户脑补剩下的选项！
+4. **[状态 4：调用 `blender_runner.run_scene` 跑 `preview` + 挑剔自审]** → **严禁自己写独立的 `bpy` 脚本直接用 `blender -b -P` 裸跑！** 必须且只能通过 `from scripts import blender_runner as br` 调用 `br.run_scene(env_code, mesh_code, camera_code, settings)`，先以 `"mode": "preview"` 生成 `preview.png`、`overview.png` 与 `report_preview.json`。必须用看图工具（`read_file` / 视觉读取）亲自查看 `preview.png` 与 `overview.png`，重点核查**画风原真性与去套路**且 `preflight.issues` 必须为空（`ok == True`），不达标必须在同一个 `output_dir` 里改代码重跑 `preview`！
+5. **[状态 5：跑 `final` 正式光追 + 二次审图 + `br.run_post_process` 合成器后期]** → 预览完全达标后，在同一个 `output_dir` 将 `mode` 设为 `"final"` 渲染 Cycles 大图并生成 `raw_cache.exr`。渲染完必须再次看图审视 `render.png`；若需要优化雾感、AO 接触阴影、泛光或色彩氛围，必须调用 `br.run_post_process(output_dir, post_process=...)` 执行匹配当前画风的 Blender 合成器后处理，并用看图工具确认最终 `render.png`。
 6. **[状态 6：导出需求 JSON + 调用提问工具弹出 0~5 星评分卡 + 增量改图]** → 展示最终成片时，**必须同轮执行**：① 调用 `profile_manager.export_requirements(session_data)` 导出 `session_requirements.json`；② **调用提问选择工具弹出 0~5 星评分选项卡片**（简易模式 1 道总评题、详细模式 4 道分项题，必须完整包含 `5星` 到 `0星`）。用户打分后调用 `record_session` 写入画像；改图必须调用 `br.run_incremental_patch(...)`。
 
-### 八大绝对禁止红线（违者直接判定任务失败）
+### 九大绝对禁止红线（违者直接判定任务失败）
+- ❌ **严禁在委派 Subagent（子智能体）进行详细建模、编写场景代码或渲染自审时使用降级模型**：若使用 `invoke_subagent`、`Task`、`spawn_agent` 或 `swarm` 开出子智能体执行建模相关工作，**必须强制使用当前主模型（传 `Model="inherit"` 或与当前主模型完全一致的旗舰模型）**，**绝对禁止降级使用 `flash`、`flash_lite`、`mini`、`haiku` 等轻量小模型**（降级模型会导致空间三维坐标、层次丰富度与 BMesh 拓扑严重缩水）！
 - ❌ **严禁不调提问工具而只发纯文本问号**（哪怕宿主工具名叫 `request_user_input`、`ask_user`、`AskUserQuestion` 或 `ask_question`，只要有交互提问工具就必须调用）。
 - ❌ **严禁绕过 `scripts/blender_runner.py` 自己写独立脚本调 `blender.exe -b -P`**（绕过会导致所有空间骨架、自动贴地、全景辅助图、九宫格曝光体检、MultiLayer EXR 后期缓存全部失效）。
-- ❌ **严禁不跑 `profile_manager.py --hints` 就自己凭空捏造选项**。
+- ❌ **严禁不跑 `profile_manager.py --hints` 就自己凭空捏造历史偏好；严禁在用户已给出主题或画面想法时再调用 `--inspire` 注入随机种子**。
 - ❌ **严禁跳过 `mode="preview"` 直接跑 `mode="final"`**，或者跑完不读 `report_preview.json`、不用看图工具检查 `preview.png` 和 `overview.png` 就盲目交差。
-- ❌ **严禁跳过空间骨架函数（`templates/spatial_archetypes.py`）而只拿几个简陋的 `primitive_cube_add` / `primitive_plane_add` 糊弄场景**。
+- ❌ **严禁跨画风硬塞固定套路物件或复刻某张旧参考图**（所有建筑、道具、天穹与后期滤镜必须自然生长于当前主题世界观，不得把某类特定模板或历史参考图里的招牌配件当成万能填充物），也不得只拿几个未修饰的 `primitive_cube_add` / `primitive_plane_add` 糊弄场景。
 - ❌ **严禁在写实/粗野/阈限场景里偷懒只连数学噪波（Noise Texture），必须按规定下载真实 CC0 PBR 扫描贴图或生成贴图**。
 - ❌ **严禁每次重试都调用 `br.new_output_dir()` 生成一堆碎片文件夹**（一次会话只建一个 `out_dir` 并全程复用）。
 - ❌ **严禁出图后只贴一张图就结束对话，必须导出 `session_requirements.json` 并调用提问工具弹出 0~5 星打分卡**！
@@ -40,7 +40,7 @@ description: 通过双分支提问（孩童式简易模式或专业详细模式�
 ## 一、沟通与交互铁律：强制使用“提问+选择”工具 + 四档自定义语气
 
 1. **强制调用当前环境的“提问+选择”交互工具（最高优先级，全语气通用）**：
-   - 只要宿主环境（Harness）提供了交互式提问工具（如 `ask_question`、`AskUserQuestion`、`ask_user` 等选择题组件），**所有向用户提问的环节（开场选语气、破冰选方向、简易模式 3 问、详细模式 4 问、运行模式确认、出图打分、改图方案确认）都必须调用该工具弹出可点击的选项卡片**。
+   - 只要宿主环境（Harness）提供了交互式提问工具（如 `ask_question`、`AskUserQuestion`、`ask_user` 等选择题组件），**所有向用户提问的环节（开场选语气、破冰选方向、简易模式 3 问、详细模式自适应补问、运行模式确认、出图打分、改图方案确认）都必须调用该工具弹出可点击的选项卡片**。
    - **严禁退化成纯文本提问**：绝不允许只在聊天框里打字问问题或纯文本罗列选项让用户手敲回复。交互工具的 UI 自带“其他/自由输入”框，用户想自己打字随时能在组件里输入。
    - **“先按所选语气回应一句 + 同轮调工具”的标准动作**：用户每次做出选择后，先在同一轮回复里输出一两句符合当前所选语气的回应文本，**紧接着在同一轮直接发起提问工具调用（Tool Call）**弹出下一题，绝不能只发完文字就停下。
 2. **四档自定义语气规范（在流程最开头由用户选定，贯穿全流程）**：
@@ -73,100 +73,98 @@ description: 通过双分支提问（孩童式简易模式或专业详细模式�
 
 ---
 
-## 二、前置引导流程（先选语气与起点 → 按需提供灵感意象 → 双分支提问）
+## 二、前置引导流程（先锁定语气与语义方向 → 严禁乱套无关种子 → 双分支提问）
 
 > **工具调用提示**：传给提问工具的 `options` 数组不要自己加序号（UI 会自动编号），不要自己建“其他/自定义”选项（UI 会自动附带自由输入框），把最推荐的一项放在第一位并加上 `(Recommended) ` 前缀。
 
-### 0. 先在后台读取画像与本轮跨流派发散种子（不打扰用户）
+### 0. 先在后台读取历史偏好（仅在用户主动要灵感时再抽样发散种子）
 开场提问前先静默运行：
 ```bash
 python scripts/profile_manager.py --hints
 ```
-读取返回 JSON：
-- `prefer`（历史 ≥4 星）：同方向可优先放第一位标 `(Recommended)`；`avoid`（<2 星）：排到最后并注明“上次评分低”；`recent_scenes`：本轮严禁重复出现同类物件或换皮场景。
-- `divergent_suggestions`：脚本每次按 **“四大审美象限”** 分层均衡抽取 **4 种空间拓扑** 与 **5 种艺术流派**（强制配额：**2 个【纯粹抽象 / 意识星冕 / 至上主义几何 / 非欧悖论】** + **1 个【超现实失重 / 阈限梦核】** + **1 个【科幻奇观】** + **1 个【建筑巨构 / 风格化光影】**）。将其作为发散跳板自由混搭，**严禁原字照抄返回字段里的提示词，更严禁把所有候选点子都写成具象写实场景**！
+读取返回 JSON（该命令**只返回历史偏好，绝不附带随机场景种子**）：
+- `prefer`（历史 ≥4 星）：**仅可在无主题约束的“提供灵感”或与当前画风相容的次级选项（如语气、画幅）中优先放第一位标 `(Recommended)`**，**绝对禁止拿过去的高分流派覆盖用户本轮新提出的不同主题！** `avoid`（<2 星）：排到最后并注明“上次评分低”；`recent_scenes`：本轮严禁重复出现同类构图或换皮场景。
+- **按需发散（`--inspire`，仅限 `路径 ③`）**：只有当用户尚未想好要画什么、主动选择“先给我提供几个场景灵感挑一挑”时，才在后台运行：
+  ```bash
+  python scripts/profile_manager.py --inspire
+  ```
+  读取返回的 `divergent_suggestions`（从 **6 大美学家族** 与 **10 种空间拓扑** 中均衡抽取多元参考跳板，不预设具体模板组合）。**核心原则**：只要用户自己提出了画面想法、氛围词或文化意象，**严禁调用 `--inspire`** 或拿无关的随机种子硬覆盖用户意图！
 
-### 1. 开场第一步：自定义语气 + 创作起点二选一（必须调用提问工具发起）
-在整个流程的最开头，直接**调用提问工具**，同时放入“语气选择”与“创作起点选择”两道题（**注意：第一步不要直接抛出一堆随机场景意象，必须先把“让用户描述自己想要的大概场景”作为首要选项！**）：
+### 1. 开场第一步（Turn 1）：根据用户是否已给出想法，自适应分流（必须调用提问工具发起）
+- **情况 A：用户首句话尚未描述具体画面或主题（只说“帮我画张图/开始吧”）**
+  同时调用提问工具放入 **2 道题**：
+  - **问题 1（自定义语气选择）：你希望我今天用什么样的语气陪你做图？**
+    - `(Recommended) 较富有激情的（乐观风趣、给足夸赞与情绪价值）`
+    - `客观冷静的（高效简洁、干练自然的正常人交流）`
+    - `充满AI味的（放飞破折号、「」引号与伪深刻AI杂句）`
+    - `像是被拖欠了工资一样极度暴躁的建模老哥（满嘴国骂极度不耐烦，但技术最顶、活儿最狠）`
+  - **问题 2（创作起点选择 —— 首要让用户自述，第二才提供灵感）：关于今天要建的场景，你想怎么开始？**
+    - **首要选项（第一项）**：`(Recommended) 我自己有大概想要的场景或主题，我来描述（可直接在下方输入框写出想法，或选完下一步告诉我）`
+    - **第二选项（第二项）**：`我还没想好具体画面，先给我提供几个场景灵感挑一挑`
 
-- **问题 1（自定义语气选择）：你希望我今天用什么样的语气陪你做图？**
-  - `(Recommended) 较富有激情的（乐观风趣、给足夸赞与情绪价值）`
-  - `客观冷静的（高效简洁、干练自然的正常人交流）`
-  - `充满AI味的（放飞破折号、「」引号与伪深刻AI杂句）`
-  - `像是被拖欠了工资一样极度暴躁的建模老哥（满嘴国骂极度不耐烦，但技术最顶、活儿最狠）`
-- **问题 2（创作起点选择 —— 首要让用户自述，第二才提供灵感）：关于今天要建的场景，你想怎么开始？**
-  - **首要选项（第一项）**：`(Recommended) 我自己有大概想要的场景，我来描述（可直接在下方输入框写出想法，或选完下一步告诉我）`
-  - **第二选项（第二项）**：`我还没想好具体画面，先给我提供几个场景灵感挑一挑`
+- **情况 B：用户首句话已经带出了主题意象、情绪概念或具体画面描述**
+  不要再问“你想自己描述还是让我给灵感”，直接调用提问工具同时问：
+  - **问题 1**：四档自定义语气选择（同上）；
+  - **问题 2**：紧扣用户刚刚说出的输入直接展开**第一步定向确认**（此问直接承担对应路径的首轮确认，下一轮不要重复再问！）：
+    - **若用户给出的是主题词、诗意命题或文化意象（未指明具体建筑布局）**：先在心中完成**审美语义解码**（识别其时代审美流派、情绪亮度与原生空间符号），给出 **3 个全部紧扣该主题真实文化语境、但美学落点各异的具体构想**（最契合语境的放第一位标 `(Recommended)`，用自然口语现场现写）+ 第 4 项 `用最简单直白的小问题慢慢挑（转入简易模式）`。
+    - **若用户已经写明了具体空间与画风**：直接跳过第一问“空间骨架与流派”，把问题 2 聚焦在尚未决定的**表面材质与造型细节**上（或先确认走详细细化 / 简易快捷）。
 
-### 2. 第一步之后的二选一路径分流（自述场景 vs 提供灵感意象）
-用户锁定语气并选择起点后，后续每一轮对话、题干和评价反馈都必须严格保持该语气人设，并按用户的选择走对应路径：
+### 2. 第一步之后的自适应引导路径（Turn 2+，保持所选语气，不重问已确认项）
+用户锁定语气后，后续每一轮对话、题干和评价反馈都必须严格保持该语气人设，并根据用户在 Turn 1 的选择进入对应路径：
 
-- **路径 ①：当用户选择了【首要选项（描述自己想要的大概场景）】或在输入框中直接写出了想法**
-  1. **若用户在第一步的输入框/首轮消息里已经写出了自己想要的大概场景**：
-     - 先用 1~2 句符合所选语气的话回应，**绝对禁止再去抛无关的随机意象选项打断用户**！
-     - 直接顺着用户描述的画面进入自适应追问：
-       - 如果用户只用简短口语聊了颜色或心情 → 进入 **分支 A：简易模式**（跳过已说过的项，直白补问剩余项）；
-       - 如果用户已经描述了具体的空间、主体、奇观或抽象构成想法 → 直接进入 **分支 B：详细模式**，并**自动跳过第一问（因为用户已经自己定了画面大方向！）**，直接围绕用户想要的这个场景，从 **第 2 问（表面材质与几何形态）**、**第 3 问（前中后景四频层次与副体群落）**、**第 4 问（光影大气与机位画幅）** 展开针对性追问。若用户连材质光影也说得很全了，只补问缺失项即可开建。
-  2. **若用户仅勾选了首要选项“我自己有大概想要的场景，我来描述”，但还没写具体文字**：
-     - 先用刚选定的语气回应，请用户直接说出/输入自己脑海里大概想要的场景（例如想建个什么样的空间、有什么核心主体或整体氛围）；等用户描述完大概场景后，立即按上面的规则顺着用户的构想进入详细模式或简易模式追问。
+- **情况 A 的后续分流**：
+  1. **若用户选了“自己描述”但还没在输入框写出想法**：用刚选定的语气回应，并调用提问工具请用户在自由输入框直接写出大概想要的画面、主题或情绪（**严禁自作主张附带具体场景或画风方向按钮来预先暗示用户**；选项仅提供纯流程入口，例如：`(Recommended) 我已在下方输入框写出具体画面或主题（进入深度细化）` / `只在下方写了简单颜色或情绪词（用简易模式带我挑）` / `还是改由你先提供几个灵感方向挑一挑（转入路径 ③）`），拿到输入后再按下方对应路径推进。
+  2. **若用户在输入框直接写出了想法**：立即进入下方 **路径 ①**（诗意/主题意象）或 **路径 ②**（具体画面）。
+  3. **若用户选择了“还没想好，给我提供几个场景灵感”**：进入下方 **路径 ③**。
 
-- **路径 ②：当且仅当用户选择了【第二选项（给我提供几个场景灵感）】时 → 进入原有的“提供几个意象选择”步骤**
-  - 先用一两句符合当前所选语气的话回应，**同一轮立即调用提问工具**，弹出原有的 **5 个场景意象与分流选项**：
-  - **问题（场景意象选择与自动分流）：给你准备了几个不同维度的画面灵感，今天想建个什么样的画面？（也可以在下方输入框随便聊）**
-    - **【强制四象限均衡配额：严禁全给现实/具象场景！】**
-      给出的 **前 4 个随机方向选项**（加上最后 1 个固定分流项共 5 项）必须严格从本轮 `divergent_suggestions` 的四大象限各取其一，**其中必须有 1~2 个是彻底脱离现实房间与自然地景的【纯粹抽象 / 高维意识 / 几何构成 / 非欧视错觉】画面**：
-      1. **象限 A（纯粹抽象 / 意识维度 / 几何非欧，必含 1~2 项）**：如纯粹色域虚空里交错咬合的精密蚀刻金环与六边形折射晶圆矩阵、至上主义悬浮原色几何切片与折射棱柱、或正交视角下首尾咬合的死循环阶梯；
-      2. **象限 B（超现实失重 / 阈限梦核，1 项）**：如倒悬在深色流云里的器物与无支撑旋梯、或空无一人的白蓝浅水瓷砖迷宫；
-      3. **象限 C（科幻奇观 / 全息圣殿，最多 1 项）**：如悬浮半透明青色全息电路矩阵的暗色核心、或天穹倒悬城市、或写实溪流尽头的远景巨构；
-      4. **象限 D（建筑空间 / 风格化光影，最多 1 项）**：如多层光井回廊、粗野主义窄巷高塔或清透二次元窗景。
-    - **最后 1 个固定分流选项**：`没想好，用最简单直白的方式带我挑`
-  - **意象选择后的分流判定**：
-    - 用户勾选了“没想好，用最简单直白的方式带我挑” → 进入 **分支 A：简易模式**。
-    - 用户勾选了前 4 个具体立体画面意象之一 → 进入 **分支 B：详细模式**（因空间大方向已由该意象选定，详细模式第 1 问可顺着该方向细化流派或直接从第 2 问材质开始）。
+- **情况 B 的后续分流**：
+  - 若 Turn 1 问题 2 已经选定了具体的**审美落点构想** $\to$ 说明“空间骨架与艺术流派”已定，**直接跳过分支 B 第一问**，从 **分支 B 第二问（材质与造型）** 开始，仅针对尚未决定的维度补问（若只剩 1~3 个未定维度就只问这 1~3 轮）；若选了转入简易模式 $\to$ 进入 **分支 A**（保留已知色彩/主题语境，不重问已明确项）。
+
+- **三条标准引导路径定义（供 Turn 2+ 或尚未完成首轮解码时执行）**：
+  - **路径 ①：用户给出了主题词、文化意象或氛围概念（尚未具体化为空间与物体）**
+    1. **文化语境与审美语义解码（三要素）**：
+       - **时代/文化指向**：该意象在视觉文化里对应哪类审美语系？（例如东方诗意指向木构园林或山水亭台；极简建筑指向清水混凝土、柱廊与自然光影；赛博怀旧指向雨夜霓虹或磁带机柜；乐观生态未来指向光泽流线曲面、水体玻璃折射与晴空绿植。）
+       - **情绪亮度与大气**：它天生属于明亮通透日光、温柔黄昏，还是沉静夜色？**光影温度必须服从用户主题本身的情绪**，不得被无关的冷暗模板拖偏。
+       - **原生空间与道具**：只用这个世界观里真正成立的建筑、自然和生活器物构建场景，**绝不强塞其他流派的标志性零件**。
+    2. **若 Turn 1 尚未做过落点确认**：同轮调用提问工具给出 3 个紧扣该主题语境的不同美学落点（`1` 标 `(Recommended)`）+ `转入简易模式`。选定后即视为完成分支 B 第一问，后续仅针对尚未决定的维度（1~3 问）逐题补全，全程忠实于该落点。
+  - **路径 ②：用户直接给出了具体清晰的空间、主体与画风描述**
+    - 用 1~2 句符合所选语气的话回应，**绝对禁止抛无关随机意象打断用户**；
+    - 仅带情绪颜色口语 $\to$ 进入 **分支 A（简易模式）**（跳过已说过的项）；
+    - 已明确空间与画风 $\to$ 进入 **分支 B（详细模式）**，跳过第一问，仅针对尚未决定的维度逐题补全。
+  - **路径 ③：用户主动选择“提供几个场景灵感”**
+    - 先在后台运行 `python scripts/profile_manager.py --inspire` 获取本轮 `divergent_suggestions`，再用日常口语现场改写并弹出 **5 个选项**：前 4 项从本轮抽取的不同美学家族与空间骨架中各取一个方向，保证风格反差鲜明；第 5 项固定为 `没想好，用最简单直白的方式带我挑`（选第 5 项进 **分支 A**，选前 4 项之一进 **分支 B**）。
 
 ---
 
 ### 分支 A：简易模式（孩童式直白 3 问，全程调用提问工具，零术语）
-每次用户选完上一题，先用一两句**符合当前所选语气档位**的话回应用户的选择（第一档热情夸赞、第二档简洁确认、第三档飙一句AI味杂句、第四档暴躁吐槽催促），**同一轮立即调用提问工具**弹出下一题。每题提供 4 个 **不超过 12 字** 的口语小选项（第一个标 `(Recommended)`）：
+每次用户选完上一题，先用一两句**符合当前所选语气档位**的话回应用户的选择（第一档热情夸赞、第二档简洁确认、第三档飙一句AI味杂句、第四档暴躁吐槽催促），**同一轮立即调用提问工具**弹出下一题。每题提供 4 个 **不超过 14 字** 的口语小选项（第一个标 `(Recommended)`），**禁止直接照抄示范原词；若用户前面已给出意象或颜色偏好，所有选项必须紧扣该主题并跳过已说过的问题**：
 
-1. **第一问（颜色，调用提问工具）：你希望画面是什么颜色的？**
-   - 选项示范（禁抄原词）：`(Recommended) 干净的纯白配浅蓝`、`暖洋洋的淡粉和奶白`、`灰蒙蒙像刚下过雨`、`黑底色配一点亮橙光`
-2. **第二问（样子/空间，调用提问工具）：你希望画面的样子是什么样的？**
-   - 结合本轮发散种子给出 **4 个反差极大的选项（强制包含至少 1~2 个纯粹抽象几何/发光星环/视错觉画面，绝不能全是现实房间或风景，禁抄原词）**：如发光金环和亮晶晶的碎片飘在空中、彩色积木板和玻璃块在空中穿插、走不到头的死循环怪楼梯、空荡荡的白蓝水池大厅等。
+1. **第一问（颜色与明暗，调用提问工具）：你希望画面是什么颜色感觉的？**
+   - 选项思路示例：暖洋洋的淡粉和奶白、沉稳暗底配一点暖橙光、雨后清冷的灰蓝夜色、干净通透的蓝白配翠绿
+2. **第二问（样子/空间，调用提问工具）：你希望画面的空间和主体是什么样的？**
+   - 围绕当前语境或本轮多元灵感，给出 **4 个空间结构截然不同的大白话选项**（例如海边飘着白纱的窗台、层层叠叠的长廊楼梯、长满绿植的阳光小广场、悬在半空的彩色几何积木等），不要全塞同类东西。
 3. **第三问（心情与画幅，调用提问工具）：你希望场景给人的心情是什么样的？**
-   - 选项示范（禁抄原词）：`(Recommended) 安静得像在做梦（横屏）`、`空空的有点怪但很干净（横屏）`、`特别高大显得人很小（竖屏）`、`离得很近很温暖（方图）`
+   - 选项思路示例：明亮轻快、安静得像在做梦（横屏）、特别高大显得人很小（竖屏）、离得很近很温暖（方图）
 
-> **简易模式后台自动转译**：收齐这 3 问后，不要再用材质、焦段等术语追问用户。模型直接在后台将颜色、空间样子与心情映射为对应的 `spatial_mode`、空间骨架积木、真实 PBR/透光材质与布光方案（例如“发光金环和亮晶晶碎片”自动映射为 `spatial_mode="floating"` + `build_profiled_machined_ring` + `build_hex_wafer_array` 抽象意识星冕；“高大显得人很小”自动匹配低角度广角仰拍 + 垂直中庭或巨构峡谷）。
+> **简易模式后台自动转译**：收齐这 3 问后，不再用术语追问。模型直接在后台将颜色、空间样子与心情映射为最契合的 `spatial_mode`、真实空间骨架与材质布光（**只生成与这 3 问完全一致的物体与气氛，不得擅自混入无关画风的配件**）。
 
 ---
 
-### 分支 B：详细模式（自适应深度意图 4 步漏斗，全程调用提问工具，保持所选语气）
+### 分支 B：详细模式（自适应深度意图漏斗，全程调用提问工具，保持所选语气）
 参考 [`references/aesthetic_rules.md`](references/aesthetic_rules.md) 与 [`references/inspiration_seeds.md`](references/inspiration_seeds.md)。每一步先用一两句**符合当前所选语气档位**的话回应上一轮选择，**同一轮立即调用提问工具**给出 4~5 个选项（首个标 `(Recommended)`，括号里最多点明一个核心技术方案；第一、二档严禁用斜杠或顿号把一堆短词硬塞在一起）。
 
-> **自适应意图感知原则（拒绝死板机械填表，严禁无故偏向具象现实场景）**：
-> - **智能跳过已明确项**：如果用户在开场或输入框里已经明确交代了某几个维度（如已指明“高维抽象意识空间”或“粗野主义崩塌峡谷”），直接跳过已知维度，把提问集中在尚未决定的**构成层次、几何形态或光影大气**上，不必死板凑满 4 问。
-> - **抽象 vs 具象自适应分流**：
->   - 若用户尚未指定方向，**严禁默认把用户往“现实风景/具象建筑”上引**，第一问的 5 个选项必须严格保持 **“至少 2 个纯粹抽象/意识维度/非欧几何构成 + 1 个超现实/阈限 + 1 个科幻奇观 + 1 个建筑光影”** 的光谱平衡！
->   - 若用户选择了**纯粹抽象 / 意识维度 / 几何构成**，后续提问应围绕**几何切面韵律、精密蚀刻环与折射晶圆矩阵、色域光束切割、焦外景深粒子**展开，绝不要出现水泥墙、草地、树木或世俗家具！
->   - 若用户明确渴望**宏大奇观 / 真实下的科幻 / 废墟崩塌**，则自动定级为 **Tier 3（宏大奇观级，净内容饱和目标 `320~750+` 构件，代码门禁低于 `150` 直接报错拦截）**，针对性引导跨尺度巨构、三级 Greeble 细节或 BMesh 真断面破碎。
+> **自适应意图感知原则（忠实用户意图，绝不强行偏科）**：
+> - **严格锁定用户主题**：如果用户已经确定了主题/流派，后续所有提问的选项都必须围绕**该流派内部的不同设计分支**展开，严禁向无关风格或固定套路偏移！
+> - **智能跳过已明确项（只问未定维度，严禁凑满 4 轮）**：若用户在 Turn 1（包括在情况 B 中拍板落点）或自述中已经明确了空间拓扑、画风、部分材质、前后景元素或光影画幅，**必须直接跳过所有已明确维度**；如果之后只剩 **1~3 个**未定维度，**就只问这 1~3 个未定维度**，绝对禁止为了凑满 4 轮而重复追问或强行编造冗余问题！
 
-1. **第一问（调用提问工具）：视觉象限、空间骨架与艺术流派**
-   - 从八大空间拓扑（**①纯粹抽象构成与高维意识虚空** **②无地面失重与非欧视错觉空间** ③封闭室内与阈限大厅 ④多层垂直中庭 ⑤两侧夹峙建筑峡谷 ⑥近景窗框纱帘 ⑦写实近景与远景巨构并置 ⑧开阔自然地景）与本轮抽样的四大象限流派中组合 **5 个选项**（**硬性配额：至少 2 个必须来自 ①~② 纯粹抽象/意识维度/几何构成/非欧视错觉象限，严禁 5 个全是现实建筑或自然地景！**）。
-   - 选项示范（禁抄原词，注意抽象与具象的对等分布）：
-     - `(Recommended) 纯粹的深邃星云色域里悬浮着多层精密蚀刻金环与六边形折射晶圆矩阵，由斜向光束切出高维精神秩序（抽象意识核心构成）`
-     - `没有任何具象墙壁与地面，半透明原色几何板片、磨砂玻璃棱柱与细黑金属轴线在虚空中穿插咬合（至上主义动态几何构成）`
-     - `用正交镜头对准四段首尾相连的悬空阶梯，在特定视角下严丝合缝咬合成永无止境的几何闭环（非欧彭罗斯视错觉空间）`
-     - `空无一人的白蓝瓷砖浅水大厅被几百枚定格半空的锋利镜面碎晶切穿，顶棚格栅透下清冷柔光（阈限空间与碎裂表现主义混搭）`
-     - `近处是开满野花的写实溪石与树根，百米外的云雾里静静立着风化的巨型星际要塞（真实下的科幻并置）`
-2. **第二问（调用提问工具）：表面材质、几何形态与结构熵（Structural Entropy）**
-   - 顺着刚选的视觉象限，提供 4 个契合该象限的材质与几何形态方案：
-     - **若选了抽象/非欧/超现实象限**：选项应聚焦于 `高反光阳极氧化金属配高折射色散水晶棱镜`、`哑光石膏色块与半透明磨砂彩玻穿插`、`暗色镜面黑曜石配内凹微光能量槽线`、`沿着锯齿断面崩裂解构的多面体碎晶气旋`。
-     - **若选了建筑/巨构/真实科幻象限**：选项则涵盖 `完整精密工业秩序（阶梯法兰机械结构 + 真实扫描 PBR 贴图）`、`自然风化共生（扫描混凝土贴图 + 岁月剥落痕迹与植被侵蚀）`、`暴力崩裂解构（带锯齿断面与外露钢筋的真断裂残骸 + 碎晶气旋）`、`实体重工业叠合半透明全息电路网格`。
-3. **第三问（调用提问工具）：跨量级远近层次、复杂度密度与语境尺度锚点**
-   - **必须调用提问工具**，按当前场景量级（Tier 1 小而美 / Tier 2 建筑中庭 / Tier 3 宏大奇观）提供 4 套搭配好的**“近景锚点 + 中景多部件核心 + 远景百米天际线/天穹奇观”**高密度方案供用户勾选，并在题干里顺带提示可在输入框补充自定义物件：
-     - **Tier 3 宏大场景示范**：必须明確写出**百米级距离差**与**语境适配的尺度参照物**（如近景溪石草坡/多层 1.05m 护栏挑空栈桥/六边形硅晶圆阵列 + 中景 5 层以上精密拆件主体 + 远景 150m 外耸立的阶梯装甲巨塔或天顶倒悬城市群）。
-4. **第四问（调用提问工具）：大气透视、天穹云海与镜头画幅**
-   - 调用提问工具让用户确认光影大气与机位焦段：如**百米级空气透视雾（远景巨构被天青色散射雾洗淡、近景保持高反差）**、双路径高对比度风暴云海、行星级弧面地平线、顶角有界丁达尔光束，以及画幅视角（如 `9:16 竖屏，用 20mm 超广角低机位仰拍五十米高空压迫感`、`16:9 横屏，透过近景树丛远眺百米外云雾中的巨型母舰`、`1:1 方图，用正交相机做出首尾闭合的视错觉`）。
+1. **第一问（若大方向未定则问）：空间骨架与艺术流派**
+   - 结合用户主题或本轮多元种子，提供 **4~5 个空间拓扑与美学气息截然不同** 的选项，**禁抄示例原词**。
+2. **第二问（若未明确则问，调用提问工具）：表面材质、造型曲线与状态细节**
+   - **必须严格契合选定的流派**，给出 4 个合乎情理的材质与造型方案（如建筑室内围绕扫描木石砖瓦与金属；自然地景围绕真实泥石草木与水波；赛博围绕湿滑反射与局部霓虹；生态未来围绕光滑曲面、透光玻璃、水波与绿植/木构；超现实围绕哑光石膏与折射玻璃等），**只在用户明确选了废墟或精密机械主题时才提断裂残骸或机械部件**。
+3. **第三问（若未明确则问，调用提问工具）：前中后景层次构图与关键元素**
+   - 提供 4 套搭配好的**“前景引导 + 中景核心构造 + 远景延伸天际线”**方案供用户勾选，并在题干里提示可在输入框补充自定义物件（方案中的所有元素必须与当前画风 100% 一致）。
+4. **第四问（若未明确则问，调用提问工具）：天空光影氛围与镜头画幅**
+   - 让用户确认符合该画风的光照天色（如暖金黄昏、柔和漫射天光、晴朗日光与积云、雨夜灯火或戏剧逆光）以及画幅焦段（`16:9 横屏` / `9:16 竖屏` / `1:1 正方`）。
 
 ---
 
@@ -182,133 +180,122 @@ python scripts/blender_finder.py --json
 
 ---
 
-## 四、场景代码编写要求（三维空间防翻车与高密度奇观规范）
+## 四、场景代码编写要求（忠实审美、立体结构与风格自适应）
 
-### 0. 动笔前强制先列“6 行三维空间与四频饱和预算草图”（严禁盲写坐标，严禁把最低红线当上限！）
-> **【防空洞警告：代码门禁 `preflight_check` 会自动扣除墙壁/地板/远山外壳，对净内容单元数与 3×3 九宫格占用率做硬性拦截！】**
-> 绝不允许把房间四面墙、地板、吊顶或一块大地形算进构件数里凑数！更严禁把最低及格线误认为“建够这几个就可以停手的大致范围”！任何场景都必须遵循**【四频饱满度法则】**：同时铺满 **①一级主核心（6~15 个拆件子结构） + ②至少 3~4 组中观副体群落（Secondary Clusters，严禁主角四周一片空地） + ③高频表面 Greebles/鳍片/铆钉/裂隙 + ④空间微粒/碎晶/晶圆/全息介质层**，确保画面 3×3 九宫格至少 6~8 个分区都有耐看的几何层次！
+### 0. 【最高红线】风格原真性 & 去参考图复刻原则（Anti-Cliché & Anti-Cloning）
+> **【警钟：绝不允许把任何参考图风格或特定模板函数当成万能零件往所有场景里硬塞！】**
+> 1. **世界观原生性**：所有结构、道具、材质、天空和灯光都必须自然生长于**当前选定的主题与画风**。严禁跨画风拼凑不相关的招牌元素（例如不要把精密涡轮环/星盘、粗野灰暗巨塔、悬浮碎晶或全息电路板塞进日常、自然、古典或生态题材；也不要把玻璃展馆、多级水池露台或某种特定色调强行套进无关题材）。
+> 2. **特定风格专用函数必须严格按题材触发**：`build_profiled_machined_ring`、`build_orbital_ribbons`、`build_megastructure_horizon(..., style="brutalist_fortress"|"orbital_spire"|"hovering_ovoid_ship")`、`build_shattered_shard_vortex`、`build_hex_wafer_array`、`build_holographic_data_matrix`、`build_inverted_sky_megacity` 均为强特定题材的专用生成器，**仅在主题本身明确需要对应机械/废墟/全息/奇观意象时才可调用**！
+> 3. **模板是可选积木，而非唯一答案**：`templates/` 里的函数只是为了帮模型快速搭稳结构，**完全鼓励你结合手写 `bmesh`、`CURVE`、`Subdivision`、`SimpleDeform`、`Array` 与 Geometry Nodes 写出最贴合本场景美学特征的原创几何体**！
 
-编写 `env_code / mesh_code / camera_code` 之前，**必须先在构思或脚本注释开头明确写出这 6 行参数**：
-1. **复杂度梯队与净内容饱和目标（剔除墙地外壳后）**：`complexity_tier` 取值：
-   - `"tier1_intimate"`（`<16m` 精致室内/特写）：**净内容饱和目标 `95 ~ 180+` 个部件**（代码门禁低于 `38` 直接报错拦截）；至少包含 1 组 8+ 部件主焦点 + 3 组副体摆件簇 + 30+ 微细节配件；
-   - `"tier2_architectural"`（默认档位，`16m~60m` 中庭/走廊/抽象构成）：**净内容饱和目标 `180 ~ 350+` 个部件**（代码门禁低于 `75` 直接报错拦截）；必须包含 12+ 部件复合核心 + 3~4 组跨层/侧翼副体结构簇 + 80+ 鳍片/晶圆/碎晶高频细节；
-   - `"tier3_spectacular"`（`60m~300m+` 宏大奇观/真实下的科幻/崩塌巨构）：**净内容饱和目标 `320 ~ 750+` 个部件/实例**（代码门禁低于 `150` 直接报错拦截）；必须同时铺满近景高密度锚点簇、中景多层解构主体、两侧跨空间副体群落、远景三级 Greeble 巨构与百枚级碎晶/全息矩阵！
-2. **空间模式与骨架组合**：`spatial_mode` 取值（`"interior"` / `"grounded"` / `"floating"` / `"framed"`）+ 选用的骨架与高阶 BMesh 生成器函数。
-3. **边界防穿帮与天穹底盘方案**：室内检查四面墙与顶棚闭合；贴地模式检查地面半径 ≥95 米或两侧被高墙完全夹住，远山/远景巨构底座 `Z <= -4.5m` 深埋地下；**峡谷与户外仰拍场景必须调用 `setup_aerial_perspective_world(...)` 或 `build_procedural_cloud_deck(...)`，严禁画面上方留出死黑虚空**。
-4. **相机与目标坐标**：`cam.location = (x, y, z)` → `target = (x, y, z)`，焦距 `mm`（宏大场景优先 `18mm~24mm` 广角），确保镜头前 0.5 米内没有实墙挡死，且中景与远景焦点在 X 轴适度错开（避免前后死死重叠遮挡）。
-5. **前/中/后景跨量级坐标带与九宫格填充计划**：近景两侧锚点簇 `Y` 区间（`1.5m~8m`）、中景核心与左右副体簇 `Y/Z` 区间（`8m~28m`）、远景巨构/天际线闭合层 `Y/Z` 区间（普通场景 `28m~80m`；**“真实下的科幻”巨构必须在 `Y = 120m ~ 260m` 配合空气透视雾**），确保屏幕 3×3 九宫格至少覆盖 6/9 以上分区。
-6. **语境适配尺度锚点**：明确写出本场景选用的尺度参照物（建筑峡谷用 `1.05m` 挑空步道护栏；抽象意识/科幻核心用 `build_hex_wafer_array` 晶圆棱晶矩阵或 `build_profiled_machined_ring` 散热鳍片；自然科幻用近景溪石野花与栈道；**严禁在非工业/非书房语境下机械硬塞工厂铁栏杆或纸质书**）。
+### 1. 动笔前先列“6 行三维空间与语境适配预算草图”
+编写 `env_code / mesh_code / camera_code` 之前，先在脚本注释开头明确写出这 6 行构思：
+1. **复杂度梯队与净内容丰富度目标（剔除墙地外壳后）**：`complexity_tier` 取值：
+   - `"tier1_intimate"`（`<16m` 精致室内/静物/极简特写）：推荐 `45 ~ 100+` 个有效内容单元（门禁红线 `18`），靠精细拆件与光影质感取胜；
+   - `"tier2_architectural"`（默认档位，`16m~60m` 室内大厅/街巷拱廊/庭院/公共广场/生态空间/抽象构成）：推荐 `80 ~ 180+` 个有效内容单元（门禁红线 `32`），包含主空间骨架、两侧群落与符合画风的建筑/植物细部；
+   - `"tier3_spectacular"`（`60m~300m+` 宏大都市/大型地景/科幻奇观）：推荐 `150 ~ 320+` 个有效内容单元（门禁红线 `60`），覆盖前中远景跨尺度层次。
+2. **空间模式与骨架组合**：`spatial_mode` 取值（`"interior"` / `"grounded"` / `"floating"` / `"framed"`）+ 选用的原创 BMesh 结构或空间骨架方案。
+3. **边界防穿帮与天穹光影方案**：
+   - 检查地面半径 ≥95m 或四周闭合，远山/建筑底座深埋地下（`Z <= -0.25m ~ -4.5m`），绝不露方形地毯边或悬空底边；
+   - 按当前画风与情绪匹配天穹照明：写实/日常/暖阳题材优先选用 CC0 HDRI（`setup_hdri_world`）或经典暖光/程序化天空（`setup_golden_hour_lighting` / `setup_procedural_sky`）；晴朗明快日光场景可选用 `setup_daylight_sky_world(...)`；阴郁戏剧或厚重云海场景可选用 `setup_aerial_perspective_world(...)` 或 `build_procedural_cloud_deck(...)`。
+4. **相机与目标坐标**：`cam.location = (x, y, z)` → `target = (x, y, z)`，焦距 `mm`，确认镜头前 0.5m 内无遮挡且主次景物在 X 轴适度错开。
+5. **前/中/后景层次分布**：明确近景锚点、中景主体与远景闭合层各自的坐标带与遮挡关系，确保 3×3 九宫格至少覆盖 5~7 个分区。
+6. **语境适配细节语言（风格 100% 统一）**：明确写出本场景如何靠**符合自身画风的原创结构与资产**拉出细节层次（例如：室内与古典庭院靠门窗棂格、柱础拱券、定制器皿与真实扫描木石纹理；自然地景靠起伏地形、CC0 植物岩石群落与水岸台阶；生态/流线未来题材靠光洁曲面造型、透光玻璃水体折射与植物群落；硬核工业才用护栏、悬缆与机械部件）。
 
-### 1. 怎么调用执行器（强制使用 `blender_runner`，单会话固定复用同一个 `output_dir`）
-> **【死锁警告：严禁自己写独立脚本直接调 `blender -b -P`】**
-> 绝不允许绕过 `scripts/blender_runner.py` 自己写一个 `.py` 文件丢给 `blender.exe` 裸跑！所有空间骨架（`build_*`）、摆放与内容密度体检（`preflight_check`）、全景辅助图（`render_overview`）、九宫格曝光质检（`check_render_exposure`）与 MultiLayer EXR 后期缓存都由 `blender_runner.py` 自动注入和调度。绕过 `blender_runner` 直接等于流程违约！
+### 2. 怎么调用执行器与子智能体（强制使用 `blender_runner`、单会话复用同一个 `output_dir`、Subagent 严禁降级模型）
+> **【硬性铁律 ① — Subagent 必须使用当前主模型，严禁降级！】**
+> 如果你在执行详细建模、编写 `env_code / mesh_code / camera_code`、跑 `preview` 审图或 `final` 渲染时，选择调用 Subagent（子智能体，如 `invoke_subagent` / `Task` / `spawn_agent` / `swarm`）来分担工作，**必须强制使用当前的主模型开出 Subagent（即显式指定 `Model="inherit"` 或与主 Agent 完全一致的旗舰模型）**！**绝对禁止为了省算力或求快而降级指定 `flash`、`flash_lite`、`mini`、`haiku` 等轻量小模型**——三维空间几何推理与复杂 BMesh 拓扑对模型能力极其敏感！
+>
+> **【硬性铁律 ② — 严禁自己写独立脚本直接调 `blender -b -P`】**
+> 绝不允许绕过 `scripts/blender_runner.py` 自己写一个 `.py` 文件丢给 `blender.exe` 裸跑！所有空间骨架、摆放体检（`preflight_check`）、全景辅助图（`render_overview`）、九宫格曝光质检（`check_render_exposure`）与 MultiLayer EXR 后期缓存都由 `blender_runner.py` 自动注入和调度。
 
-把脚本拆成三段交给 [`scripts/blender_runner.py`](scripts/blender_runner.py)（`templates/` 下所有空间骨架、高阶 BMesh 生成器、材质、几何节点、摆放与渲染后期函数会自动注入，**直接调用，不要复制模板源码**）。
-> **严禁每次重跑预览都新建文件夹**：在开始写代码前**只调用一次** `out_dir = br.new_output_dir("简短英文标签")`，后续所有 `preview` 重试、`final` 正式渲染、`run_post_process` 后期调色与 `run_incremental_patch` 增量改图**必须全程复用同一个 `out_dir`**，严禁在循环或重试里反复调用 `new_output_dir` 产生碎片目录！
+把脚本拆成三段交给 [`scripts/blender_runner.py`](scripts/blender_runner.py)（`templates/` 下所有函数会自动注入，**直接调用，不要复制模板源码**）。
+> **严禁每次重跑预览都新建文件夹**：只调用一次 `out_dir = br.new_output_dir("简短英文标签")`，后续所有 `preview`、`final`、`run_post_process`、`run_incremental_patch` **必须全程复用同一个 `out_dir`**！
 
 ```python
 from scripts import blender_runner as br
 out_dir = br.new_output_dir("简短英文标签")  # 全程只建一次！
+# 务必从以下 8 种预设中挑选真正匹配本场景画风的一项，禁止盲抄固定预设：
+# cinematic_warm / clean_anime / liminal_dream / high_contrast_chiaroscuro /
+# sterile_cold_brutalist / surreal_ethereal_glow / bright_luminous_daylight / vibrant_futuristic_gloss
+chosen_post_preset = "请按当前画风替换为上述预设之一"
 settings = {
     "mode": "preview",                 # 自审一律先用 preview (EEVEE)；通过后再改 "final" (Cycles)
     "spatial_mode": "grounded",        # 必填："interior" | "grounded" | "floating" | "framed"
     "complexity_tier": "tier2_architectural",  # 必填："tier1_intimate" | "tier2_architectural" | "tier3_spectacular"
-    "width": 1920, "height": 1080,     # 竖屏巨构/中庭常用 1080x1920 或 1350x1800
+    "width": 1920, "height": 1080,     # 竖屏常用 1080x1920 或 1350x1800
     "subjects": ["主角或核心结构空物体名"],
     "output_dir": out_dir,             # 预览、正式出图、后期与改图全程复用同一个 out_dir
-    "view": "AgX",
+    "view": "AgX",                     # 二次元/纯平插画风可用 "Standard"
     "look": "AgX - Medium High Contrast",
-    # 正式渲染时会自动同时缓存 16-bit MultiLayer raw_cache.exr
-    "post_process": "sterile_cold_brutalist",  # 可选预设: cinematic_warm / sterile_cold_brutalist / liminal_dream / surreal_ethereal_glow / high_contrast_chiaroscuro / clean_anime
+    "post_process": chosen_post_preset,
 }
 result = br.run_scene(env_code, mesh_code, camera_code, settings)
 ```
 
-### 2. 优先用模块化“空间骨架与奇观生成器”搭稳大空间（[`templates/spatial_archetypes.py`](templates/spatial_archetypes.py)）
-不要手算零散方块拼房间、不要手写单层网格捏假山、**更不要用拍扁的 `primitive_uv_sphere_add` 捏假云团**，优先调用内置高阶生成器搭稳空间与天际线：
-- **“真实下的科幻”百米远景巨构群**：`build_megastructure_horizon(name, distance_y=155.0, span_x=175.0, base_height=88.0, tower_count=3, style="brutalist_fortress" | "orbital_spire" | "hovering_ovoid_ship", add_greebles=True, add_window_lights=True, mat_hull=..., mat_rib=..., mat_glow=...)`。自带一级内倾装甲体 + 二级悬挑肋梁 + 三级高频工业 Greebles 与微光舷窗，底座深扎 `Z=-8.0m` 绝不悬空。
-- **全息数据矩阵与天穹星盘线框罩**：`build_holographic_data_matrix(name, center=(0, 11, 3.8), span=(9.5, 12, 5.5), panel_count=26, add_sky_wireframe_dome=True, dome_radius=68.0, glow_color=(0.08, 0.88, 1.0))`。生成带镂空电路纹理的半透明发光 HUD 屏幕阵列与天顶六边形线框球罩。
-- **天穹倒悬大都会 / 倒置黑金字塔**：`build_inverted_sky_megacity(name, ceiling_z=52.0, y_range=(18, 145), span_x=115.0, block_count=72, add_bridge_spire=True, add_inverted_pyramid=False, mat_building=..., mat_window_glow=...)`。
-- **双路径大气透视天空与风暴云海**：`setup_aerial_perspective_world(sky_zenith=(0.05, 0.11, 0.22), sky_horizon=(0.42, 0.56, 0.72), cloud_contrast=0.65, add_planetary_arc=False, mist_start=16.0, mist_depth=175.0)`。一键解决“峡谷顶部死黑”与“远景巨构缺乏百米空气透视感”两大痛点！
-- **高拟真多层程序化体积云海**：`build_procedural_cloud_deck(name, z_height=-2.2, span_xy=180.0, layers=3, thickness=3.2)`（**严禁用压扁的 UV Sphere 堆叠煎饼假云！**）。
-- **两侧夹峙建筑峡谷 / 粗野主义挑空栈桥巨构**：`build_canyon_corridor(name, alley_width=7.8, length=46.0, height=42.0, bay_count=9, overhead_beams=True, focal_spire_height=28.0, catwalk_levels=3, add_railings=True, ground_mat=..., wall_mat=..., rail_mat=...)`。开启 `catwalk_levels=3` 时自动在两侧高墙生成 3 层挑空步道与 1.05m 标准人体尺度护栏。
-- **封闭室内 / 阈限池核大厅**：`build_enclosed_room(name, width, length, height, openings={...}, ceiling_coffers=(3, 4, 0.28), skylight_strips=2, pillars=[...])`。
-- **多层垂直光井 / 叠落楼梯中庭**：`build_vertical_atrium(name, width, length, levels=4, level_height=3.4, add_stairs=True, add_railings=True)`。
-- **超现实失重旋梯 / 非欧视错觉空间 / 半透窗台框景**：`build_spiral_stair_ribbon(...)`、`build_impossible_stair_loop(..., setup_ortho_camera=True)`、`build_gravity_flip_room(...)`、`build_window_frame_stage(...)`。
-- **不穿帮大圆地面 / 不漏底实体远山 / 有界丁达尔光束**：`build_endless_ground(radius=95.0, ...)`、`build_grounded_backdrop_ridge(distance_y=48.0, base_sink=-4.5, ...)`、`create_volumetric_light_beam(...)`。
+### 3. 原创建模优先 + 按题材可选的模块化空间工具（[`templates/spatial_archetypes.py`](templates/spatial_archetypes.py) & [`templates/modeling.py`](templates/modeling.py)）
+构思三维场景时**优先用原生建模工具与真实资产打造契合主题的独特轮廓**，再按需要选用预置空间积木（**切勿把新增的特定建筑模板当成万能外壳克隆到无关题材里**）：
 
-### 3. 高阶 BMesh 参数化构件、真破碎拓扑与语境尺度锚点（[`templates/modeling.py`](templates/modeling.py)）
-- **每个核心构筑物至少拆成 3~8 个以上真实结构部件**，严禁拿单块长方体或光秃甜甜圈充当主角：
-  - **真破碎板梁与混凝土残骸（严禁歪放完整方块冒充破碎！）**：凡表现崩裂台阶、折断天桥横梁或坍塌石板，必须调用 `build_bmesh_fractured_slab(name, location, dims=(2.8, 1.8, 0.36), rotation, crack_irregularity=0.24, rebar_count=5, mat_shell=..., mat_core=..., mat_rebar=..., allow_float=...)` 生成带真实锯齿断裂截面、粗糙混凝土内芯与外露扭曲钢筋的破损结构体。
-  - **大中小三级立体多面体碎晶气旋**：表现崩塌碎片场或能量结晶漩涡时，调用 `build_shattered_shard_vortex(name, count=120, center=(0, 12, 5), radius_range=(1.2, 8.5), height_span=9.0, spiral_turns=1.6, mat_primary=..., mat_accent=..., accent_ratio=0.18)` 生成上百枚真实封闭凸多面体棱晶。
-  - **博物馆级精密机械环与散热鳍片阵列（淘汰光秃甜甜圈！）**：表现科幻星环、日冕光环、陀螺仪或神圣几何巨环时，调用 `build_profiled_machined_ring(name, major_radius=4.5, radial_width=0.38, axial_height=0.26, location, rotation, fin_count=48, mat_body=..., mat_glow=..., mat_fin=...)`。
-  - **三维六边形硅晶圆与 14 面体棱晶矩阵**：在抽象意识空间、量子核心或精密科幻内景中，调用 `build_hex_wafer_array(name, count=90, center=(0, 10, 4), spread=(6.5, 6.5, 5.0), clear_radius=2.2, mat_wafer=..., mat_prism=...)` 提供极其丰富的前中后景微尺度参照，且自动清空中央 `clear_radius` 视线通廊。
-  - **自然拱曲翻开书本与高空悬链线电缆**：书房/人文场景调用 `build_curved_open_book(...)`；峡谷/工业场景调用 `build_hanging_cables(...)`。
-- **语境适配尺度参照物（严禁跨语境乱塞！）**：
-  - 建筑峡谷/粗野巨构/垂直中庭 $\to$ 用 `build_canyon_corridor(..., catwalk_levels=3)` 或 `build_human_scale_railing(..., height=1.05)` 提供 1.05 米人体护栏标尺；
-  - 抽象意识/量子脑海/微观科幻 $\to$ 用 `build_hex_wafer_array` 与 `build_profiled_machined_ring` 的密集散热鳍片提供精密微尺度标尺（**严禁在此类场景放入黑色工厂铁护栏或纸质书本！**）；
-  - 真实下的科幻（自然 × 巨构） $\to$ 用近景 CC0 树木/岩石、`apply_gn_foliage_scatter` 野花草丛与木栈道提供人间写实标尺。
-- **复杂有机体优先搜 CC0 模型**：植物、岩石、座椅、灯具、杂物先用 `asset_loader.search_cc0_assets("models", ["英文关键词"])` 搜索，`download_cc0_model(id)` 下载后用 `import_cc0_model(path, location, rotation_z_deg, target_height)` 按真实米制尺寸导入（注意若模型含 LOD0~LOD3 子网格，只保留 LOD0 渲染）。
-- **手写结构必加倒角、厚度与结构咬合**：硬边一律 `add_bevel` 接高光，薄板一律 `add_solidify` 给真实厚度；室内立柱顶端必须向上嵌入顶板（`Z_top >= ceiling_z + 0.02`），严禁柱顶与天花板之间留出几厘米悬空断缝。
+- **原创程序化建模与真实 CC0 资产（首选方式）**：
+  - 充分使用手写 `bmesh`、`CURVE` 放样、修改器（`add_bevel`、`add_solidify`、`add_simple_deform`、`add_subdivision`、`add_array`）与 Geometry Nodes（`apply_gn_surface_scatter`）塑造真正贴合当前画风的建筑体块、曲线轮廓与器物细节；确保立柱顶入天花板、构件严丝合缝。
+  - 植物、岩石、树木、座椅、日常器皿等优先用 `asset_loader.search_cc0_assets("models", ["英文关键词"])` + `download_cc0_model(id)` + `import_cc0_model(...)` 导入真实 CC0 资产（若含 LOD0~LOD3，只保留 LOD0）。
+- **经典通用空间骨架（按需可选基础积木）**：
+  - 室内、柱廊与窗景：`build_enclosed_room(...)`、`build_arched_colonnade(...)`、`build_vertical_atrium(...)`、`build_window_frame_stage(...)`、`build_canyon_corridor(...)`。
+  - 开阔地景与基础光束：`build_endless_ground(radius=95.0, ...)`、`build_grounded_backdrop_ridge(distance_y=48.0, base_sink=-4.5, ...)`、`create_volumetric_light_beam(...)`。
+- **晴朗日光 / 流线公共空间可选积木（仅在构想确实需要对应形态时按需选用）**：
+  - `setup_daylight_sky_world(...)`：晴朗蓝天白云 + 明快太阳主光与轻柔大气散射，适合一切阳光积极题材（海岸公园、现代庭院、Solarpunk、Frutiger Aero 等）。
+  - `build_swept_ribbon_bridge(...)` & `build_smooth_planter_pod(...)`：贝塞尔放样飘带天桥 / 流线雨棚、圆润生态种植休憩池。
+  - `build_terraced_water_plaza(...)` & `build_curved_glass_pavilion(...)`：仅当需要多级露台水景广场或抛物线拱顶玻璃展馆时选用（**切忌把玻璃展馆或弧形广场当成所有明亮题材的唯一默认模板**，生态/未来感完全可以通过滨海长廊、嵌入山丘或水下的透明球穹、轨交露台或自由曲线造型来表达）。
+  - `build_megastructure_horizon(..., style="sleek_biomorphic_towers")`：仅当远景需要流畅曲线建筑天际线时选用。
+- **特定风格专用系列（⚠️ 仅在主题明确需要时使用，切勿跨画风乱放！）**：
+  - 超现实 / 非欧：`build_spiral_stair_ribbon(...)`、`build_impossible_stair_loop(..., setup_ortho_camera=True)`、`build_gravity_flip_room(...)`、`build_orbital_ribbons(...)`。
+  - 废墟 / 破碎：`build_bmesh_fractured_slab(...)`、`build_shattered_shard_vortex(...)`、`build_hanging_cables(...)`。
+  - 硬核科幻 / 精密机械 / 全息 / 风暴天穹：`build_megastructure_horizon(..., style="brutalist_fortress"|"orbital_spire"|"hovering_ovoid_ship")`、`build_profiled_machined_ring(...)`、`build_hex_wafer_array(...)`、`build_holographic_data_matrix(...)`、`build_inverted_sky_megacity(...)`、`setup_aerial_perspective_world(...)`、`build_procedural_cloud_deck(...)`。
 
-### 4. 材质三阶梯（写实与粗野/阈限场景严禁纯噪波糊弄）
-- **第一梯队（真实扫描 CC0 PBR 贴图集）**：混凝土、瓷砖、石材、木板、金属、泥地等大面积结构，主动调用 `asset_loader.download_pbr_texture_set(...)` 下载颜色+粗糙度+法线贴图，传给 `setup_pbr_texture_material(..., use_box_mapping=True)`。
-- **第二梯队（生图定制贴图）**：特定墙面剥落图案、瓷砖拼花、定制划痕水渍灰度图，调用 `image-generator` 子智能体生成无缝图，传给 `setup_generated_texture_material(...)`。
-- **第三梯队（程序化节点适用范围）**：仅用于折射磨砂玻璃（`create_pbr_frosted_glass_material`）、半透薄纱窗帘、发光光环、低多边形纯平切面、或离线保底。
-- **程序化星空防纸屑规则**：若在暗空背景节点里点缀星光，Voronoi `Scale` 必须 ≥ 600 且阈值极高（`> 0.996`），严禁把 `Scale` 设在 100~200 导致满天大块白纸屑。
+### 4. 材质三阶梯（写实表面拒绝纯数学噪波塑料感）
+- **第一梯队（真实扫描 CC0 PBR 贴图集）**：混凝土、瓷砖、石材、木板、金属、泥地等大面积结构，调用 `asset_loader.download_pbr_texture_set(...)` 下载贴图，传给 `setup_pbr_texture_material(..., use_box_mapping=True)`。
+- **第二梯队（生图定制贴图）**：特定墙面图案、花纹瓷砖、定制表面遮罩，调用生图工具生成无缝图传给 `setup_generated_texture_material(...)`。
+- **第三梯队（程序化节点适用范围）**：用于折射玻璃（`create_pbr_frosted_glass_material`）、清澈水面、半透薄纱窗帘、洁净烤漆、赛璐珞双阶色块（`create_procedural_toon_material`）、低多边形纯平切面、或离线保底。
+- **程序化星空防纸屑规则**：暗空背景点缀星光时，Voronoi `Scale` 必须 ≥ 600 且阈值 `> 0.996`。
 
 ### 5. 按空间模式摆放物体
-- `spatial_mode="grounded"`：先建 `build_endless_ground` 与 `build_grounded_backdrop_ridge`，再对所有大件主体、岩石、箱罐逐一调用 `snap_to_ground(obj)`（带腿家具用 `mode="highest"`），最后才调用 `apply_gn_surface_scatter(..., avoid_objects=[...])`。
-- `spatial_mode="floating"`：无需贴地；对在地面模式里故意悬空的局部环带、横梁或碎片设置 `obj["vm_allow_float"] = True` 即可豁免浮空报警。
+- `spatial_mode="grounded"`：先建 `build_endless_ground` 与远山，再对独立主体、岩石、家具调用 `snap_to_ground(obj)`（带腿家具用 `mode="highest"`），最后再调用 `apply_gn_surface_scatter(..., avoid_objects=[...])`。
+- `spatial_mode="floating"`：无需贴地；在地面模式里故意悬空的局部结构设 `obj["vm_allow_float"] = True` 豁免浮空报警。
 
 ---
 
 ## 五、双阶段严苛自审与 Blender 合成器后处理管线（严禁自我感动）
 
-### 阶段 A：Preview 预览期“代码量化门禁 + 6 维视觉清单 + 确定性修复配方”（未全部达标严禁进 Final）
+### 阶段 A：Preview 预览期“代码量化门禁 + 视觉清单”（未达标严禁进 Final）
 > **【自审迭代熔断规则：单次任务最多允许 3~4 轮微调重跑】**
-> 每次重跑**必须复用同一个 `out_dir`**，且每次必须针对具体问题应用下方的**确定性修复配方**，严禁盲目乱改参数或陷入超过 4 轮的死循环！若只是曝光、光晕或雾气浓淡问题，无需重跑 3D 渲染，直接进阶段 B 用 `br.run_post_process` 1 秒无损调色。
+> 每次重跑**必须复用同一个 `out_dir`**，且每次针对具体问题精准修复。若只是曝光、光晕或雾气浓淡问题，无需重跑 3D 渲染，直接进阶段 B 用 `br.run_post_process` 秒级无损调色。
 
 每次跑完 `"mode": "preview"`，必须按以下顺序逐项核验：
 
 1. **先过代码量化门禁 `result["report"]`**：
-   - `preflight.issues` 非空（涵盖：主角/配景/远山悬空、方形地面边缘穿帮、立柱与吊顶脱节断缝、相机贴墙挡死、**九宫格局部死白过曝**、全局死黑欠曝、或**全图灰蒙发平缺乏动态范围**）：**必须先按提示修好代码并在同一 `output_dir` 重跑预览，严禁带病出正式图**。
-   - `missing_images` 或 `missing_subjects` 非空：立即修正贴图路径或物体命名。
-2. **用 `read_file` 同时查看 `preview.png` 与 `overview.png`，执行 6 维挑剔审图与确定性修复**：
-   - `overview.png` 会自动聚焦在主相机与核心主体周围，并自动隐藏室内吊顶以及遮挡视线的峡谷高墙。若画面异常，结合 `overview.png` 里的红色相机箭头和 `diagnostics` 定位原因。
-   - **6 维视觉否决项与确定性修复配方（有一项不达标就按配方改代码重跑预览）**：
-     1. **局部高光与天穹死黑检查**：前景窗框、玻璃或发光环有没有被高能灯光/自发光轰成一片死白（若有，将大体积发光环 `Emission Strength` 降至 `1.8~3.5` 改靠金属反射接光）？**峡谷或户外画面上方 1/3 是否一片死黑**（若是，立即补调 `setup_aerial_perspective_world(...)` 生成双路径风暴云海，严禁留黑洞）？
-     2. **结构衔接严密性**：立柱顶端有没有严丝合缝顶住天花板？远山与远景巨构底座有没有深扎入地下（`Z <= -4.5m`，无漏底天空线）？
-     3. **真破碎、真机械环与真云海检查（拒绝低幼原语）**：
-        - 有没有把“崩裂/废墟”画成歪着放的完整长方体？（若有，立即替换为 `build_bmesh_fractured_slab` + `build_shattered_shard_vortex`！）
-        - 有没有拿光秃秃的 `primitive_torus_add` 甜甜圈当核心巨环？（若有，替换为 `build_profiled_machined_ring`！）
-        - 有没有拿拍扁的 `primitive_uv_sphere_add` 堆叠煎饼假云？（若有，替换为 `build_procedural_cloud_deck`！）
-     4. **语境适配尺度参照与宏大感检查**：巨构峡谷或高耸祭坛旁有没有 `1.05m` 挑空步道护栏（`catwalk_levels=3`）？抽象科幻空间有没有 `build_hex_wafer_array` 晶圆棱晶矩阵？远景巨构是否因为离镜头太近（`<35m`）且无空气透视而显得像 3 米塑料玩具？（若是，改用 `build_megastructure_horizon(distance_y=155, base_height=88)` + `setup_aerial_perspective_world(mist_start=16, mist_depth=175)`）。
-     5. **前中后三层空间纵深与视线通廊**：近景遮挡框、中景焦点构筑物、远景闭合结构是否在 X 轴适度错开、剪影和明度清晰拉开（确保前景不把远景主角挡死）？
-     6. **材质真实微质感**：写实表面有没有真实扫描纹理凹凸与粗糙度明暗变化？贴图有没有明显重复方格？
+   - `preflight.issues` 非空或 `missing_images` / `missing_subjects` 非空：修好代码并在同一 `output_dir` 重跑预览，严禁带病出正式图。
+2. **用 `read_file` 同时查看 `preview.png` 与 `overview.png`，执行“0 + 6 维”挑剔审图**：
+   - **【第 0 优先否决项：画风原真性与去套路检查（最重要！）】**：
+     - 这张图第一眼看过去，**是否真正传达了用户想要的时代审美、情绪基调与色彩亮度**？
+     - 画面里有没有不请自来、违和出戏的跨画风套路元素或与主题无关的模板克隆痕迹？如果有，**立刻删掉所有不属该世界观的违和构件，换回真正贴合主题的建筑/植物/水景/原创造型重跑**！
+   - **六项工程视觉核查**：
+     1. **曝光与天穹检查**：局部玻璃/自发光是否过曝死白？户外天空是否符合题材情绪（明亮场景用 `setup_daylight_sky_world`，不要黑洞或莫名阴云）？
+     2. **结构衔接严密性**：立柱是否顶住顶板？远山与建筑底座是否深扎地下无漏底天空线？
+     3. **造型质感与曲面细节**：是否避免了“裸露未经修饰的几个原始方块/假云饼”？玻璃、曲面拱顶、曲线步道或碎片结构是否平滑自然？
+     4. **尺度参照合理性**：场景内是否有契合当前语境的尺度参考（如门窗框格、台阶栏杆、桌椅器皿、植物树木等）？
+     5. **前中后三层纵深与遮挡**：前景、中景焦点与远景是否错落拉开层次，前景没有把主体死死挡住？
+     6. **材质真实微质感**：写实表面是否有真实扫描凹凸与粗糙度变化，无明显贴图重复方格？
 
 ### 阶段 B：Final 正式渲染后二次审视 + Blender 管线独立秒级后处理（`br.run_post_process`）
-预览自审全部过关后，将 `settings["mode"]` 改为 `"final"`（保持同一 `output_dir`）使用 Cycles 渲染 `render.png`（底层会自动在同目录保存包含 `Image` / `Mist` / `AO` 三通道的 16-bit MultiLayer 缓存 `raw_cache.exr`）。
+预览自审全部过关后，将 `settings["mode"]` 改为 `"final"`（保持同一 `output_dir`）使用 Cycles 渲染 `render.png`（底层会自动保存 16-bit MultiLayer 缓存 `raw_cache.exr`）。
 
 **Cycles 出图后绝不能直接交差，必须执行二次审图与后处理润色**：
-1. **调用 `read_file` 查看 `render.png`，并查看 `report_render.json["exposure_check"]`**：
-   - 仔细观察 Cycles 成品是否存在：**远景几何边缘过于生硬像塑料模型**、**建筑夹角与底座缺乏接触阴影压暗**、**高光/发光体干瘪缺乏电影级柔光晕染**、**冷暖影调平淡**或**局部明暗需要微调**。
-2. **按需调用 `br.run_post_process(...)` 秒级迭代 Blender 合成器后处理（无需重跑 3D 光追，仅需 ~1 秒）**：
-   - 如果 `render.png` 还可以进一步提升氛围，或者需要针对 `exposure_check["post_process_recommendations"]` 强化画面，直接调用：
+1. **调用 `read_file` 查看 `render.png`，并查看 `report_render.json["exposure_check"]`**。
+2. **按需调用 `br.run_post_process(...)` 秒级迭代 Blender 合成器后处理（选用匹配当前画风的预设！）**：
    ```python
    post_res = br.run_post_process(
        output_dir=out_dir,
-       post_process={
-           "preset": "sterile_cold_brutalist",  # 可选基础预设，也可直接传下面的模块字典
-           "mist": {"color": (0.78, 0.85, 0.92, 1.0), "strength": 0.30},         # 景深空气透视雾气，柔化远景硬边
-           "ao_boost": {"strength": 0.35},                                       # 强化角落与底座 AO 接触阴影
-           "glare": {"glare_type": "Fog Glow", "threshold": 0.9, "strength": 0.3, "size": 0.5},  # 泛光: Bloom / Fog Glow / Streaks
-           "color_balance": {"lift": (0.96, 0.98, 1.04, 1.0), "gamma": (1.0, 1.0, 1.02, 1.0), "gain": (1.02, 1.01, 0.98, 1.0), "factor": 0.65},
-           "contrast_saturation": {"brightness": 0.0, "contrast": 6.0, "saturation": 0.92},
-           "vignette": {"strength": 0.32, "scale": 0.80, "feather": 0.24},       # 椭球高斯柔化暗角，收拢视觉中心
-           "lens_distortion": {"dispersion": 0.009, "distortion": -0.006},       # 边缘光学色散与微畸变，破除 CG 数码感
-           "sharpen": {"strength": 0.14},                                        # 材质微纹理清晰度锐化
-       },
+       post_process=chosen_post_preset,  # 务必与当前画风匹配；也可传 {"preset": chosen_post_preset, ...} 局部覆盖模块参数
        view="AgX",
        look="AgX - Medium High Contrast",
        exposure=0.0,
@@ -326,7 +313,7 @@ result = br.run_scene(env_code, mesh_code, camera_code, settings)
 
 ### 1. 导出需求记录 JSON
 调用 `scripts/profile_manager.py` 的 `export_requirements(session_data)`，写入本次 `output_dir/session_requirements.json`（脚本会自动剥离 `(Recommended)` 等前缀标签）。
-`session_data` 常用键：`tone_mode`（所选语气档位）、`interaction_mode`（`"simple"` 或 `"detailed"`）、`spatial_archetype`、`spatial_mode`、`art_movement`、`geometry_form`、`material_shading`、`keyword`、`subject`、`scene`、`user_detail`、`color_temperature`、`color_saturation`、`ratio`、`camera_lens`、`assets_used`、`output_dir`、`render_file`、`blend_file`。
+`session_data` 常用键：`tone_mode`（所选语气档位）、`interaction_mode`（`"simple"` 或 `"detailed"`）、`spatial_archetype`、`spatial_mode`、`complexity_tier`、`art_movement`、`geometry_form`、`material_shading`、`lighting_mood`、`keyword`、`subject`、`scene`、`user_detail`、`color_temperature`、`color_saturation`、`ratio`、`camera_lens`、`assets_used`、`output_dir`、`render_file`、`blend_file`。
 
 ### 2. 按当前分支模式调用提问工具打分（允许 0 星差评，完整列出 0~5 星选项）
 

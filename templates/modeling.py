@@ -592,7 +592,7 @@ def build_shattered_shard_vortex(
     seed=42,
 ):
     '''
-    用 BMesh 程序化生成大、中、小三级尺度的立体多面体尖锐碎晶/残片漩涡场（参考 Act1bg / Wbg8 / sterile_organ_canyon_v2）。
+    用 BMesh 程序化生成大、中、小三级尺度的立体多面体尖锐碎晶/残片漩涡场（仅适用于崩塌废墟、能量结晶漩涡等对应题材）。
     每个碎片均为真实封闭凸多面体棱晶或楔形石块，自动标记 vm_allow_float=True。返回父级 Empty。
     '''
     import bmesh
@@ -686,8 +686,8 @@ def build_profiled_machined_ring(
     allow_float=True,
 ):
     '''
-    用 BMesh 12 点阶梯截面旋转放样生成博物馆级精密机械光环（带内外阶梯法兰、内凹发光能量槽与径向散热鳍片阵列）。
-    彻底淘汰简陋的 primitive_torus_add 光秃秃甜甜圈！返回父级 Empty。
+    用 BMesh 12 点阶梯截面旋转放样生成带径向散热鳍片的工业精密机械涡轮环（仅适用于硬核机械、推进器、精密工业核心等题材；
+    普通建筑圆环、光晕丝带或生态题材切勿强行套用）。返回父级 Empty。
     '''
     import bmesh
     root = bpy.data.objects.new(name, None)
@@ -801,8 +801,7 @@ def build_hex_wafer_array(
     seed=7,
 ):
     '''
-    生成三维倒角六边形硅晶圆与 14 面体折射棱晶矩阵（自动在中央留出 clear_radius 视线通廊，绝不挡主角）。
-    专用于抽象意识空间、量子核心、神圣几何或高精度科幻内景，提供丰富的前中后景微尺度参照，无需生硬塞入工厂铁栏杆。
+    生成三维倒角六边形芯片与棱晶悬浮阵列（仅适用于量子矩阵、数据核心或微粒抽象构成题材，切忌乱塞入建筑或自然生态场景）。
     '''
     import bmesh
     import random as _r
@@ -871,6 +870,239 @@ def build_hex_wafer_array(
         if mat:
             ob.data.materials.append(mat)
         placed += 1
+
+    bpy.context.view_layer.update()
+    return root
+""",
+
+    "build_smooth_planter_pod": """
+def build_smooth_planter_pod(
+    name="PlanterPod",
+    location=(0.0, 0.0, 0.0),
+    radius_x=1.8,
+    radius_y=1.1,
+    height=0.52,
+    rotation_z_deg=0.0,
+    add_bench_rim=True,
+    mat_shell=None,
+    mat_soil=None,
+    mat_bench=None,
+):
+    '''
+    生成圆润流线型建筑种植池 / 生态休憩台座（带凹陷绿植种植槽与可选悬挑弧形座椅边檐）。
+    适用于现代广场、玻璃中庭、公园、生态建筑与室内展厅。返回父级 Empty。
+    '''
+    import bmesh
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = location
+    root.rotation_euler = (0.0, 0.0, math.radians(rotation_z_deg))
+
+    bpy.ops.mesh.primitive_cylinder_add(vertices=48, radius=1.0, depth=height, location=(0.0, 0.0, height * 0.5))
+    shell = bpy.context.object
+    shell.name = f"{name}_Shell"
+    shell.scale = (radius_x, radius_y, 1.0)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    for p in shell.data.polygons:
+        p.use_smooth = True
+    add_bevel(shell, width=min(0.05, height * 0.12), segments=3)
+    shell.parent = root
+    if mat_shell:
+        shell.data.materials.append(mat_shell)
+
+    # 顶部环状花坛压顶缘（高出内侧土面 4cm，形成真凹陷种植槽）
+    rim_me = bpy.data.meshes.new(f"{name}_RimMesh")
+    bm = bmesh.new()
+    segs = 48
+    in_b, out_b, in_t, out_t = [], [], [], []
+    z_rb, z_rt = height - 0.04, height + 0.04
+    for si in range(segs):
+        ang = (si / float(segs)) * math.tau
+        ca, sa = math.cos(ang), math.sin(ang)
+        in_b.append(bm.verts.new((radius_x * 0.84 * ca, radius_y * 0.82 * sa, z_rb)))
+        out_b.append(bm.verts.new((radius_x * 1.01 * ca, radius_y * 1.01 * sa, z_rb)))
+        in_t.append(bm.verts.new((radius_x * 0.84 * ca, radius_y * 0.82 * sa, z_rt)))
+        out_t.append(bm.verts.new((radius_x * 1.01 * ca, radius_y * 1.01 * sa, z_rt)))
+    for si in range(segs):
+        sn = (si + 1) % segs
+        bm.faces.new((in_t[si], out_t[si], out_t[sn], in_t[sn]))
+        bm.faces.new((out_b[si], in_b[si], in_b[sn], out_b[sn]))
+        bm.faces.new((out_b[si], out_b[sn], out_t[sn], out_t[si]))
+        bm.faces.new((in_t[si], in_t[sn], in_b[sn], in_b[si]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(rim_me)
+    bm.free()
+    for p in rim_me.polygons:
+        p.use_smooth = True
+    rim_ob = bpy.data.objects.new(f"{name}_LipRim", rim_me)
+    bpy.context.collection.objects.link(rim_ob)
+    add_bevel(rim_ob, width=0.012, segments=2)
+    rim_ob.parent = root
+    if mat_shell:
+        rim_ob.data.materials.append(mat_shell)
+
+    bpy.ops.mesh.primitive_cylinder_add(vertices=44, radius=1.0, depth=0.08, location=(0.0, 0.0, height - 0.04))
+    bed = bpy.context.object
+    bed.name = f"{name}_TurfBed"
+    bed.scale = (radius_x * 0.84, radius_y * 0.82, 1.0)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    for p in bed.data.polygons:
+        p.use_smooth = True
+    bed.parent = root
+    if mat_soil:
+        bed.data.materials.append(mat_soil)
+
+    if add_bench_rim:
+        bpy.ops.mesh.primitive_cylinder_add(vertices=48, radius=1.0, depth=0.075, location=(0.0, 0.0, height * 0.72))
+        bench = bpy.context.object
+        bench.name = f"{name}_BenchRim"
+        bench.scale = (radius_x * 1.12, radius_y * 1.12, 1.0)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        for p in bench.data.polygons:
+            p.use_smooth = True
+        add_bevel(bench, width=0.018, segments=2)
+        bench.parent = root
+        bmat = mat_bench or mat_shell
+        if bmat:
+            bench.data.materials.append(bmat)
+
+    bpy.context.view_layer.update()
+    return root
+""",
+
+    "build_arched_colonnade": """
+def build_arched_colonnade(
+    name="ArchedColonnade",
+    start_pt=(-8.0, 6.0, 0.0),
+    end_pt=(8.0, 6.0, 0.0),
+    bay_count=4,
+    height=4.4,
+    depth=0.55,
+    pillar_radius=0.24,
+    mat_pillar=None,
+    mat_arch=None,
+):
+    '''
+    沿起止点生成真圆弧拱券柱廊（每跨均含底部柱础、圆柱、柱头、严丝合缝的实体拱腹 spandrel、平滑拱券与顶部檐梁）。
+    适用于古典庭院、现代美术馆、火车站长廊、地中海海滨走廊或静谧废墟。返回父级 Empty。
+    '''
+    import bmesh
+    from mathutils import Vector
+    p0 = Vector(start_pt)
+    p1 = Vector(end_pt)
+    span_vec = p1 - p0
+    total_len = span_vec.length
+    if total_len < 0.5:
+        return None
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = p0
+    root.rotation_euler = (0.0, 0.0, math.atan2(span_vec.y, span_vec.x))
+
+    n_bays = max(1, int(bay_count))
+    bay_w = total_len / float(n_bays)
+    spring_z = height * 0.58
+    arch_r = max(0.25, bay_w * 0.5 - pillar_radius * 0.85)
+    amat = mat_arch or mat_pillar
+
+    # 立柱、柱础与柱头过渡块
+    for i in range(n_bays + 1):
+        cx = i * bay_w
+        bpy.ops.mesh.primitive_cylinder_add(vertices=28, radius=pillar_radius, depth=spring_z, location=(cx, 0.0, spring_z * 0.5))
+        col = bpy.context.object
+        col.name = f"{name}_Pillar_{i}"
+        for p in col.data.polygons:
+            p.use_smooth = True
+        col.parent = root
+        if mat_pillar:
+            col.data.materials.append(mat_pillar)
+
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(cx, 0.0, 0.14))
+        plinth = bpy.context.object
+        plinth.name = f"{name}_Plinth_{i}"
+        plinth.scale = (pillar_radius * 2.6, max(depth * 1.08, pillar_radius * 2.6), 0.28)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        add_bevel(plinth, width=0.018, segments=2)
+        plinth.parent = root
+        if mat_pillar:
+            plinth.data.materials.append(mat_pillar)
+
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(cx, 0.0, spring_z - 0.06))
+        cap = bpy.context.object
+        cap.name = f"{name}_Capital_{i}"
+        cap.scale = (pillar_radius * 2.5, max(depth * 1.06, pillar_radius * 2.5), 0.14)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        add_bevel(cap, width=0.015, segments=2)
+        cap.parent = root
+        if mat_pillar:
+            cap.data.materials.append(mat_pillar)
+
+    # BMesh 拱券与完整矩形拱腹填充段（两端垂直落到柱头上，绝不留三角形缺口）
+    arch_segs = 28  # 4 左竖边 + 20 顶横边 + 4 右竖边
+    side_segs = 4
+    top_segs = 20
+    for bi in range(n_bays):
+        mid_x = (bi + 0.5) * bay_w
+        me = bpy.data.meshes.new(f"{name}_ArchMesh_{bi}")
+        bm = bmesh.new()
+        hy = depth * 0.5
+        front_in, front_out, back_in, back_out = [], [], [], []
+        top_z = height - 0.16
+        arch_rise = min(arch_r, top_z - spring_z - 0.14)
+        left_x = mid_x - bay_w * 0.5
+        right_x = mid_x + bay_w * 0.5
+
+        for si in range(arch_segs + 1):
+            ang = math.pi * (1.0 - si / float(arch_segs))
+            ix = mid_x + arch_r * math.cos(ang)
+            iz = spring_z + arch_rise * math.sin(ang)
+            if si <= side_segs:
+                t_s = si / float(side_segs)
+                ox = left_x
+                oz = spring_z + (top_z - spring_z) * t_s
+            elif si >= arch_segs - side_segs:
+                t_s = (si - (arch_segs - side_segs)) / float(side_segs)
+                ox = right_x
+                oz = top_z - (top_z - spring_z) * t_s
+            else:
+                t_s = (si - side_segs) / float(top_segs)
+                ox = left_x + bay_w * t_s
+                oz = top_z
+            front_in.append(bm.verts.new((ix, -hy, iz)))
+            front_out.append(bm.verts.new((ox, -hy, oz)))
+            back_in.append(bm.verts.new((ix, hy, iz)))
+            back_out.append(bm.verts.new((ox, hy, oz)))
+
+        for si in range(arch_segs):
+            bm.faces.new((front_in[si], front_in[si + 1], front_out[si + 1], front_out[si]))
+            bm.faces.new((back_out[si], back_out[si + 1], back_in[si + 1], back_in[si]))
+            f_soffit = bm.faces.new((front_in[si], back_in[si], back_in[si + 1], front_in[si + 1]))
+            f_soffit.smooth = True
+            bm.faces.new((front_out[si], front_out[si + 1], back_out[si + 1], back_out[si]))
+        bm.faces.new((front_in[0], front_out[0], back_out[0], back_in[0]))
+        bm.faces.new((back_in[-1], back_out[-1], front_out[-1], front_in[-1]))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(me)
+        bm.free()
+        aob = bpy.data.objects.new(f"{name}_Arch_{bi}", me)
+        bpy.context.collection.objects.link(aob)
+        aob.parent = root
+        aob["vm_allow_float"] = True
+        add_bevel(aob, width=0.008, segments=1)
+        if amat:
+            aob.data.materials.append(amat)
+
+    # 顶部通长檐梁
+    bpy.ops.mesh.primitive_cube_add(size=1.0, location=(total_len * 0.5, 0.0, height - 0.08))
+    beam = bpy.context.object
+    beam.name = f"{name}_Cornice"
+    beam.scale = (total_len + pillar_radius * 2.8, depth * 1.18, 0.18)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    add_bevel(beam, width=0.02, segments=2)
+    beam.parent = root
+    beam["vm_allow_float"] = True
+    if amat:
+        beam.data.materials.append(amat)
 
     bpy.context.view_layer.update()
     return root
