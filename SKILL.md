@@ -1,6 +1,6 @@
 ---
 name: Vibe-Modeler
-description: 通过双分支提问（孩童式简易模式或专业详细模式）发散引导用户探索多元艺术流派与立体空间结构，在 Blender 中自动生成 3D 场景、执行空间体检并渲染出图，支持多轮对话改图。
+description: 让LLM给你出主意，从零开始用Blender建造个3D场景出来
 ---
 
 # Vibe-Modeler
